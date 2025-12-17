@@ -1,0 +1,171 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# RTD Calibration Tree Structure
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Este archivo documenta la estructura jerárquica del árbol de calibración RTD.
+# El árbol conecta sensores a través de múltiples rondas de calibración.
+#
+# REGLAS GENERALES:
+# ─────────────────
+# 1. Cada set de 3ª ronda contiene SIEMPRE 12 sensores
+# 2. Estos 12 sensores provienen de sensores "raised" (elevados) de sets de 2ª ronda
+# 3. Cada set de 2ª ronda aporta un número fijo de sensores raised al set de 3ª ronda
+#
+# TERMINOLOGÍA:
+# ─────────────
+# - round: Ronda de calibración (1, 2, 3, etc.)
+# - parents: Sets de ronda anterior que alimentan este set
+# - sensors_per_parent: Número de sensores raised que cada parent aporta
+# - total_sensors: Total de sensores en el set (debe ser 12 para ronda 3)
+# - status: Estado del set (processed, pending, future)
+#
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Metadata general del árbol
+tree_metadata:
+  project: RTD_Calibration_VGP
+  description: "Árbol de calibración jerárquico para sensores RTD"
+  version: "1.0"
+  date_created: "2025-10-23"
+  author: "VGP Lab"
+
+# Reglas de validación
+validation_rules:
+  round_3_sensor_count: 12  # Cada set de ronda 3 debe tener exactamente 12 sensores
+  min_sensors_per_parent: 1  # Mínimo de sensores que un parent puede aportar
+  max_sensors_per_parent: 6  # Máximo de sensores que un parent puede aportar
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEFINICIÓN DE SETS - RONDA 3
+# ═══════════════════════════════════════════════════════════════════════════
+
+sets:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Set 57: Primer set de 3ª ronda (COMPLETO Y PROCESADO)
+  # ─────────────────────────────────────────────────────────────────────────
+  57:
+    round: 3
+    status: processed
+    description: "Set de 3ª ronda formado por sensores raised de sets 49-54"
+    
+    # Sets padres (2ª ronda)
+    parents: [49, 50, 51, 52, 53, 54]
+    
+    # Cada parent aporta 2 sensores raised
+    sensors_per_parent: 2
+    
+    # Total esperado: 6 parents × 2 sensores = 12 sensores
+    total_sensors: 12
+    
+    # Composición detallada (cuando esté disponible desde LogFile.csv)
+    composition:
+      from_set_49: []  # 2 sensores raised del Set 49
+      from_set_50: []  # 2 sensores raised del Set 50
+      from_set_51: []  # 2 sensores raised del Set 51
+      from_set_52: []  # 2 sensores raised del Set 52
+      from_set_53: []  # 2 sensores raised del Set 53
+      from_set_54: []  # 2 sensores raised del Set 54
+    
+    notes: |
+      Este set agrupa sensores raised de 6 sets consecutivos de 2ª ronda.
+      Cada set padre aporta exactamente 2 sensores raised.
+      Estado: Completamente procesado y analizado.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Set FUTURE_A: Segundo set de 3ª ronda (PENDIENTE DE CREAR)
+  # ─────────────────────────────────────────────────────────────────────────
+  future_set_from_55_56:
+    round: 3
+    status: future
+    description: "Futuro set de 3ª ronda formado por sensores raised de sets 55 y 56"
+    
+    # Sets padres (2ª ronda)
+    parents: [55, 56]
+    
+    # Cada parent aporta 6 sensores raised
+    sensors_per_parent: 6
+    
+    # Total esperado: 2 parents × 6 sensores = 12 sensores
+    total_sensors: 12
+    
+    # Composición detallada (pendiente)
+    composition:
+      from_set_55: []  # 6 sensores raised del Set 55
+      from_set_56: []  # 6 sensores raised del Set 56 (aún no procesado)
+    
+    notes: |
+      Este set aún no ha sido creado porque:
+      - Set 56 está pendiente de procesamiento
+      - Se requiere identificar los 6 sensores raised de cada set padre
+      - Una vez procesado Set 56, se podrá crear este set de 3ª ronda
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SETS DE 2ª RONDA
+# ═══════════════════════════════════════════════════════════════════════════
+# Cada set de Round 2 agrupa 6 sets consecutivos de Round 1
+# (excepto Set 55 que agrupa sets 40-45 = 6 sets)
+
+  49:
+    round: 2
+    parents: [3, 4, 5, 6, 7, 8]  # Sets 3-8 de Round 1 → Set 49 de Round 2
+    
+  50:
+    round: 2
+    parents: [9, 10, 11, 13, 14, 15]  # Sets 9-15 de Round 1 → Set 50 de Round 2
+    
+  51:
+    round: 2
+    parents: [16, 17, 18, 19, 20, 21]  # Sets 16-21 de Round 1 → Set 51 de Round 2
+    
+  52:
+    round: 2
+    parents: [22, 23, 24, 25, 26, 27]  # Sets 22-27 de Round 1 → Set 52 de Round 2
+    
+  53:
+    round: 2
+    parents: [28, 29, 30, 31, 32, 33]  # Sets 28-33 de Round 1 → Set 53 de Round 2
+    
+  54:
+    round: 2
+    parents: [34, 35, 36, 37, 38, 39]  # Sets 34-39 de Round 1 → Set 54 de Round 2
+    
+  55:
+    round: 2
+    parents: [40, 41, 42, 43, 44, 45]  # Sets 40-45 de Round 1 → Set 55 de Round 2
+    
+  56:
+    round: 2
+    parents: [46, 47, 48]  # Sets 46-48 de Round 1 → Set 56 de Round 2 (incompleto, faltan 3 sets)
+    notes: "Pendiente - faltan 3 sets de Round 1 para completar"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SETS DE 1ª RONDA (REFERENCIA)
+# ═══════════════════════════════════════════════════════════════════════════
+# La información de raised/discarded está en sensors.yaml
+# Aquí solo se documentan sets que no están en sensors.yaml o tienen info adicional
+
+first_round_sets: {}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# INSTRUCCIONES DE USO
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Para cargar este archivo en Python:
+#
+#   import yaml
+#   with open('config/tree.yaml', 'r') as f:
+#       tree_config = yaml.safe_load(f)
+#
+# Para validar la estructura:
+#
+#   from RTD_Calibration_VGP.src.calibration_network import validate_tree
+#   ok, issues = validate_tree(tree_config, logfile_df)
+#   if not ok:
+#       print("Problemas detectados:", issues)
+#
+# Para visualizar el árbol:
+#
+#   from RTD_Calibration_VGP.src.calibration_network import visualize_tree
+#   visualize_tree(tree_config, highlight=57)
+#
+# ═══════════════════════════════════════════════════════════════════════════

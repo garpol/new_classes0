@@ -1,0 +1,257 @@
+paths:
+  data_dir: "RTD_Calibration_VGP/data/temperature_files"
+  logfile: "RTD_Calibration_VGP/data/LogFile.csv"
+  plots_dir: "RTD_Calibration_VGP/notebooks/Plots"
+
+selection:
+  selected_sets: []  # empty = all
+
+sensors:
+  sets:
+    3.0:
+      discarded: [48205, 48478]
+      raised: [48203, 48479]
+      round: 1
+    4.0:
+      discarded: [48485, 48490]
+      raised: [48484, 48491]
+      round: 1
+    5.0:
+      discarded: [48797]
+      raised: [48673, 48800]
+      round: 1
+    6.0:
+      discarded: [48733, 48746]
+      raised: [48731, 48747]
+      round: 1
+    7.0:
+      discarded: [48751, 48754, 48836]
+      raised: [48753, 48839]
+      round: 1
+    8.0:
+      discarded: [48841, 48848]
+      raised: [48845, 48851]
+      round: 1
+    9.0:
+      discarded: []
+      raised: [48857, 48863]
+      round: 1
+    10.0:
+      discarded: []
+      raised: [48869, 48875]
+      round: 1
+    11.0:
+      discarded: []
+      raised: [48884, 48887]
+      round: 1
+    13.0:
+      discarded: []
+      raised: [48905, 48911]
+      round: 1
+    14.0:
+      discarded: [48957, 48960, 48961]
+      raised: [48956, 48963]
+      round: 1
+    15.0:
+      discarded: [48520, 48965]
+      raised: [48521, 48964]
+      round: 1
+    16.0:
+      discarded: [49107, 49108]
+      raised: [49106, 49112]
+      round: 1
+    17.0:
+      discarded: [49117, 49124]
+      raised: [49119, 49123]
+      round: 1
+    18.0:
+      discarded: [49166]
+      raised: [49126, 49131]
+      round: 1
+    19.0:
+      discarded: [49169]
+      raised: [49167, 49176]
+      round: 1
+    20.0:
+      discarded: []
+      raised: [49181, 49186]
+      round: 1
+    21.0:
+      discarded: [49191, 49200]
+      raised: [49192, 49197]
+      round: 1
+    22.0:
+      discarded: [49205, 49210]
+      raised: [49204, 49211]
+      round: 1
+    23.0:
+      discarded: [49226, 49235, 49236, 49237]
+      raised: [49227, 49233]
+      round: 1
+    24.0:
+      discarded: [49242]
+      raised: [49238, 49244]
+      round: 1
+    25.0:
+      discarded: [49251, 49253]
+      raised: [49250, 49257]
+      round: 1
+    26.0:
+      discarded: [55190, 55043, 55104]
+      raised: [54875, 55044]
+      round: 1
+    27.0:
+      discarded: [55103, 55075, 55072]
+      raised: [55073, 54881]
+      round: 1
+    28.0:
+      discarded: [55199, 55198]
+      raised: [55208, 55215]
+      round: 1
+    29.0:
+      discarded: [55193]
+      raised: [55264, 55263]
+      round: 1
+    30.0:
+      discarded: [55255, 55173, 54926]
+      raised: [55253, 55168]
+      round: 1
+    31.0:
+      discarded: [55195]
+      raised: [55186, 55194]
+      round: 1
+    32.0:
+      discarded: [54931]
+      raised: [55166, 54930]
+      round: 1
+    33.0:
+      discarded: [54934]
+      raised: [54878, 54876]
+      round: 1
+    34.0:
+      discarded: []
+      raised: [54878, 54876]
+      round: 1
+    35.0:
+      discarded: [55231, 55232, 55245]
+      raised: [55241, 55233]
+      round: 1
+    36.0:
+      discarded: [55040]
+      raised: [55050, 55041]
+      round: 1
+    37.0:
+      discarded: [55015, 55083]
+      raised: [55014, 55084]
+      round: 1
+    38.0:
+      discarded: [55237]
+      raised: [55217, 55221]
+      round: 1
+    39.0:
+      discarded: []
+      raised: [55252, 55188]
+      round: 1
+    40.0:
+      discarded: [55205]
+      raised: [54869, 54870]
+      round: 1
+    41.0:
+      discarded: []
+      raised: [54840, 54841]
+      round: 1
+    42.0:
+      discarded: [55019]
+      raised: [54897, 55022]
+      round: 1
+    43.0:
+      discarded: []
+      raised: [55021, 55023]
+      round: 1
+    44.0:
+      discarded: []
+      raised: [54856, 54845]
+      round: 1
+    45.0:
+      discarded: []
+      raised: [55056, 55061]
+      round: 1
+    46.0:
+      discarded: [49107]
+      raised: [48957, 49235]
+      round: 1
+    47.0:
+      discarded: [55199]
+      raised: [55075, 55195]
+      round: 1
+    48.0:
+      discarded: [55245]
+      raised: [55015, 55173]
+      round: 1
+    49.0:
+      discarded: []
+      raised: [48484, 48747]
+      round: 2
+    50.0:
+      discarded: []
+      raised: [48869, 48956]
+      round: 2
+    51.0:
+      discarded: []
+      raised: [49112, 49167]
+      round: 2
+    52.0:
+      discarded: []
+      raised: [49233, 55073]
+      round: 2
+    53.0:
+      discarded: []
+      raised: [55253, 55227]
+      round: 2
+    54.0:
+      discarded: []
+      raised: [55233, 55221]
+      round: 2
+    55.0:
+      discarded: []
+      raised: [54869, 54870, 54840, 54897, 54845,  55061 ]
+      round: 2
+    57.0:
+      discarded: []
+      raised: []
+      round: 3
+    58.0:
+      discarded: []
+      raised: []
+      round: "Refs"
+    59.0:
+      discarded: []
+      raised: [58400, 58367]
+      round: 1
+    60.0:
+      discarded: [58384]
+      raised: [58385, 58381]
+      round: 1
+    62.0:
+      discarded: []
+      raised: []
+      round: 3
+    63.0:
+      discarded: []
+      raised: []
+      round: 4
+
+run_options:
+  max_nan_threshold: 40
+  valid_temp_range:
+    min: 60
+    max: 350
+  default_ref_channel: 2
+
+output:
+  save_calibration_excel: true
+  calibration_excel_name: "calibration_constants_and_errors.xlsx"
+
+logging:
+  level: "INFO"
+  verbose: true
