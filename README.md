@@ -171,20 +171,6 @@ Los sensores "raised" requieren calibración especial:
 
 ### Rango Recomendado
 
-**Use siempre --range 3 39** para procesar la Ronda 1 completa. Sets fuera de este rango pueden tener conexiones incompletas.
+**Usar --range 3 39** para procesar la Ronda 1 completa. Sets fuera de este rango pueden tener conexiones incompletas.
 
-## 🧪 Testing
 
-Los notebooks incluyen validaciones integradas:
-- Verificación de integridad de CSVs
-- Comparación de estrategias (primer camino vs media ponderada)
-- Histogramas de distribución de errores
-
-## 👨‍🔬 Autor
-
-Proyecto de calibración RTD - TFG/TFM
-Universidad Politécnica de Madrid
-
-## 📄 Licencia
-
-Este proyecto es material académico para evaluación.
