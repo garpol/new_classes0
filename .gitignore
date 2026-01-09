@@ -1,3 +1,40 @@
-# Ignore all data directory and tar files
+# Data files
 RTD_Calibration/data/
 *.tar
+
+# Documentation (generada por IA, no subir)
+RTD_Calibration/docs/
+RTD_Calibration/notebooks/README.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# macOS
+.DS_Store
+
+# Backups y archivos antiguos
+RTD_Calibration/config/backups/
+RTD_Calibration/archive/
+*.backup
+*.before_compact
+
+# Tests (de momento)
+RTD_Calibration/tests/
+
+# IDE
+.vscode/
+.idea/
+
+# Excel results
+*.xlsx
+*.xls

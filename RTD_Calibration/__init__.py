@@ -1,7 +1,6 @@
-"""Compatibility package for tests expecting lowercase package name.
+"""RTD Calibration package.
 
-This package re-exports modules from the existing `RTD_Calibration_VGP` package
-so tests which import `rtd_calibration_vgp.src.*` continue to work.
+Main package for RTD temperature sensor calibration analysis.
 """
 
 __all__ = ["src"]

@@ -135,8 +135,8 @@ sets:
     
   56:
     round: 2
-    parents: [46, 47, 48]  # Sets 46-48 de Round 1 → Set 56 de Round 2 (incompleto, faltan 3 sets)
-    notes: "Pendiente - faltan 3 sets de Round 1 para completar"
+    parents: [46, 47, 48, 59, 60, 61]  # Sets 46-48 de Round 1 → Set 56 de Round 2 (incompleto, faltan 3 sets)
+    notes: "Pendiente - faltan 2 sets de Round 1 para completar"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SETS DE 1ª RONDA (REFERENCIA)

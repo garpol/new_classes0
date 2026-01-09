@@ -1,4 +1,4 @@
-"""Utility helpers for RTD_Calibration_VGP.
+"""Utility helpers for RTD Calibration.
 
 Provides a small config loader that reads YAML (falls back to JSON-like dicts)
 and returns a normalized dictionary with safe defaults.
@@ -16,10 +16,10 @@ except Exception:
 
 DEFAULT_CONFIG: Dict[str, Any] = {
 	"paths": {
-			"data_dir": "RTD_Calibration_VGP/data/temperature_files",
-			"logfile": "RTD_Calibration_VGP/data/LogFile.csv",
-			"logfile_parsed": "RTD_Calibration_VGP/data/LogFile_parsed.csv",
-			"plots_dir": "RTD_Calibration_VGP/notebooks/Plots",
+			"data_dir": "RTD_Calibration/data/temperature_files",
+			"logfile": "RTD_Calibration/data/LogFile.csv",
+			"logfile_parsed": "RTD_Calibration/data/LogFile_parsed.csv",
+			"plots_dir": "RTD_Calibration/notebooks/Plots",
 	},
 		"selection": {"selected_sets": [], "require_integer_calibset": True},
 	"sensors": {
