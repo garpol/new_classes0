@@ -30,7 +30,6 @@ RTD_Calibration/
 │   ├── tree.py                # Construcción del árbol y cálculo multi-camino
 │   ├── run.py                 # Procesamiento de runs individuales
 │   ├── logfile.py             # Gestión del LogFile
-│   └── calibration_network.py # Red de calibración (deprecado)
 ├── notebooks/
 │   ├── SET.ipynb              # Análisis de sets individuales
 │   ├── RUN.ipynb              # Análisis de runs
