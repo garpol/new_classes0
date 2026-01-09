@@ -30,8 +30,8 @@ from pathlib import Path
 # Añadir src al path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
-from set import Set
-from tree import Tree
+from set import Set  # type: ignore
+from tree import Tree  # type: ignore
 import yaml
 
 

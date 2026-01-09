@@ -1,0 +1,10 @@
+{
+  "include": [
+    "RTD_Calibration"
+  ],
+  "extraPaths": [
+    "RTD_Calibration/src"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic"
+}
