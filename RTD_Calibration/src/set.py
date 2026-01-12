@@ -213,15 +213,21 @@ class Set:
         Guarda los resultados en un archivo Excel.
         
         Args:
-            output_file: Nombre del archivo de salida
+            output_file: Nombre del archivo de salida (se guardará en docs/)
         """
         if not self.calibration_constants:
             print("No hay constantes calculadas para guardar")
             return
         
-        print(f"\nGuardando resultados en {output_file}")
+        # Construir ruta hacia docs/
+        from pathlib import Path
+        docs_dir = Path(__file__).parent.parent / "docs"
+        docs_dir.mkdir(exist_ok=True)  # Crear si no existe
+        output_path = docs_dir / output_file
         
-        with pd.ExcelWriter(output_file) as writer:
+        print(f"\nGuardando resultados en {output_path}")
+        
+        with pd.ExcelWriter(output_path) as writer:
             for set_num in sorted(self.calibration_constants.keys()):
                 # Guardar constantes
                 sheet_name = f"Set_{int(set_num)}_Constants"
@@ -231,7 +237,7 @@ class Set:
                 sheet_name = f"Set_{int(set_num)}_Errors"
                 self.calibration_errors[set_num].to_excel(writer, sheet_name=sheet_name)
         
-        print(f"✓ Resultados guardados en {output_file}")
+        print(f"✓ Resultados guardados en {output_path}")
     
     def get_summary(self):
         """
