@@ -13,8 +13,12 @@ permitiendo calcular offsets encadenados.
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
-import yaml
 import os
+import yaml
+try:
+    from .utils import load_config, propagate_error
+except ImportError:
+    from utils import load_config, propagate_error
 
 
 class Tree:
@@ -23,7 +27,7 @@ class Tree:
     a través de sensores raised que sirven como puentes.
     """
     
-    def __init__(self, sets_dict: Dict[float, Any], config_path: str = None):
+    def __init__(self, sets_dict: Dict[float, Any], config_path: Optional[str] = None):
         """
         Inicializa el árbol de calibración.
         
@@ -32,7 +36,7 @@ class Tree:
             config_path: Ruta al archivo config.yml (opcional)
         """
         self.sets = sets_dict
-        self.config = self._load_config(config_path)
+        self.config = load_config(config_path)
         self.tree_config = self._load_tree_config()
         
         # Almacenar offsets calculados: {(sensor_origen, sensor_destino): (offset, error)}
@@ -42,31 +46,18 @@ class Tree:
         self.sets_by_round: Dict[int, List[float]] = {1: [], 2: [], 3: []}
         self._classify_sets_by_round()
     
-    def _load_config(self, config_path: str = None) -> dict:
-        """Carga la configuración desde config.yml"""
-        if config_path is None:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            config_path = os.path.join(current_dir, '..', 'config', 'config.yml')
-        
-        try:
-            with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
-        except Exception as e:
-            print(f"Advertencia: No se pudo cargar configuración: {e}")
-            return {}
-    
     def _load_tree_config(self) -> dict:
         """Carga la estructura del árbol desde tree.yaml"""
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             tree_path = os.path.join(current_dir, '..', 'config', 'tree.yaml')
             
-            with open(tree_path, 'r') as f:
+            with open(tree_path, 'r', encoding='utf-8') as f:
                 tree_data = yaml.safe_load(f)
             
             print("\n✓ Estructura del árbol cargada desde tree.yaml")
             return tree_data
-        except Exception as e:
+        except (FileNotFoundError, yaml.YAMLError, OSError) as e:
             print(f"Advertencia: No se pudo cargar tree.yaml: {e}")
             return {}
     
@@ -114,6 +105,94 @@ class Tree:
         for round_num, sets in self.sets_by_round.items():
             if sets:
                 print(f"  Ronda {round_num}: {len(sets)} sets -> {sets}")
+    
+    # =========================================================================
+    # HELPERS para reducir duplicación en calculate_all_offsets_*
+    # =========================================================================
+    
+    def _get_sets_config(self):
+        """Retorna la configuración de sets desde config.yml"""
+        return self.config.get('sensors', {}).get('sets', {})
+    
+    def _get_set_info(self, set_id: float) -> dict:
+        """Obtiene la configuración completa de un set"""
+        return self._get_sets_config().get(float(set_id), {})
+    
+    def _get_set_sensors(self, set_id: float) -> list:
+        """Obtiene la lista de sensores normales de un set"""
+        return self._get_set_info(set_id).get('sensors', [])
+    
+    def _get_set_raised(self, set_id: float) -> list:
+        """Obtiene la lista de sensores raised de un set"""
+        return self._get_set_info(set_id).get('raised', [])
+    
+    def _get_set_discarded(self, set_id: float) -> list:
+        """Obtiene la lista de sensores descartados de un set"""
+        return self._get_set_info(set_id).get('discarded', [])
+    
+    def _determine_r1_sets(self, reference_set: float, r1_sets_range: Optional[tuple] = None) -> list:
+        """
+        Determina qué sets R1 procesar según el modo (manual con rango o automático con tree.yaml)
+        
+        Args:
+            reference_set: Set de referencia R3
+            r1_sets_range: Tupla (min, max) para modo manual, None para automático
+        
+        Returns:
+            Lista de IDs de sets R1 a procesar
+        """
+        if r1_sets_range:
+            # Modo manual: usar rango especificado
+            print(f"  Modo manual: Limitando a sets R1 del {r1_sets_range[0]} al {r1_sets_range[1]}")
+            r1_sets = self.sets_by_round.get(1, [])
+            r1_sets = [s for s in r1_sets if r1_sets_range[0] <= s <= r1_sets_range[1]]
+        else:
+            # Modo automático: usar tree.yaml
+            r1_sets = self.get_r1_sets_for_r3_set(int(reference_set))
+            print(f"  Modo automático: Procesando {len(r1_sets)} sets R1 desde tree.yaml")
+            print(f"  Sets R1: {r1_sets}")
+        return sorted(r1_sets)
+    
+    def _get_reference_info(self, reference_set: float) -> tuple:
+        """
+        Obtiene información del set de referencia
+        
+        Returns:
+            Tupla (reference_sensor, ref_sensors_list)
+        """
+        ref_config = self._get_set_info(reference_set)
+        ref_sensors = ref_config.get('sensors', [])
+        
+        if not ref_sensors:
+            print(f"Error: Set {reference_set} no tiene sensores definidos")
+            return None, []
+        
+        reference_sensor = ref_sensors[0]
+        return reference_sensor, ref_sensors
+    
+    def _print_calibration_summary(self, df: pd.DataFrame, title: str):
+        """Imprime resumen de resultados de calibración"""
+        if df.empty:
+            print(f"\n{title}: Sin resultados")
+            return
+        
+        calculated = df[df['Status'] == 'Calculado']
+        discarded = df[df['Status'] == 'Descartado']
+        no_connection = df[df['Status'] == 'Sin conexión']
+        
+        print(f"\n{title}:")
+        print(f"  Total sensores: {len(df)}")
+        print(f"  Calculados: {len(calculated)}")
+        print(f"  Descartados: {len(discarded)}")
+        print(f"  Sin conexión: {len(no_connection)}")
+        
+        if len(calculated) > 0:
+            print(f"  Error promedio: {calculated['Error_K'].mean():.4f} K")
+            print(f"  Error máximo: {calculated['Error_K'].max():.4f} K")
+    
+    # =========================================================================
+    # FIN HELPERS
+    # =========================================================================
     
     def get_offset_within_set(self, set_id: float, sensor_from: int, sensor_to: int) -> Tuple[Optional[float], Optional[float]]:
         """
@@ -219,7 +298,7 @@ class Tree:
         
         # Sumar offsets y propagar errores
         total_offset = offset1 + offset2
-        total_error = np.sqrt(error1**2 + error2**2)
+        total_error = propagate_error(error1, error2)
         
         return total_offset, total_error
     
@@ -235,7 +314,7 @@ class Tree:
         """
         sets_config = self.config.get('sensors', {}).get('sets', {})
         
-        for set_id, set_obj in self.sets.items():
+        for set_id in self.sets.keys():
             set_config = sets_config.get(float(set_id), {})
             sensors = set_config.get('sensors', [])
             
@@ -463,7 +542,7 @@ class Tree:
             
             # ¡Éxito! Encadenar offsets
             total_offset = offset_1 + offset_2 + offset_3
-            total_error = np.sqrt(error_1**2 + error_2**2 + error_3**2)
+            total_error = propagate_error(error_1, error_2, error_3)
             
             if return_steps:
                 steps = {
@@ -493,8 +572,8 @@ class Tree:
             return None, None, None
         return None, None
 
-    def calculate_all_offsets(self, reference_set: float = None, 
-                             r1_sets_range: tuple = None) -> pd.DataFrame:
+    def calculate_all_offsets(self, reference_set: Optional[float] = None, 
+                             r1_sets_range: Optional[tuple] = None) -> pd.DataFrame:
         """
         Calcula offsets de todos los sensores de Ronda 1 respecto a la referencia absoluta.
         
@@ -517,45 +596,31 @@ class Tree:
         
         print(f"\nCalculando offsets respecto a Set {reference_set} (Ronda 3)")
         
-        # Determinar qué sets R1 procesar
-        if r1_sets_range:
-            # Modo manual: usar rango especificado
-            print(f"  Modo manual: Limitando a sets R1 del {r1_sets_range[0]} al {r1_sets_range[1]}")
-            r1_sets = self.sets_by_round.get(1, [])
-            r1_sets = [s for s in r1_sets if r1_sets_range[0] <= s <= r1_sets_range[1]]
-        else:
-            # Modo automático: usar tree.yaml
-            r1_sets = self.get_r1_sets_for_r3_set(int(reference_set))
-            print(f"  Modo automático: Procesando {len(r1_sets)} sets R1 desde tree.yaml")
-            print(f"  Sets R1: {r1_sets}")
+        # Determinar qué sets R1 procesar usando helper
+        r1_sets = self._determine_r1_sets(reference_set, r1_sets_range)
         
-        sets_config = self.config.get('sensors', {}).get('sets', {})
-        ref_config = sets_config.get(float(reference_set), {})
-        ref_sensors = ref_config.get('sensors', [])
-        
-        if not ref_sensors:
-            print(f"Error: Set {reference_set} no tiene sensores definidos")
+        # Obtener información de referencia usando helper
+        reference_sensor, _ = self._get_reference_info(reference_set)
+        if reference_sensor is None:
             return pd.DataFrame()
         
-        reference_sensor = ref_sensors[0]
         print(f"  Referencia absoluta: Sensor {reference_sensor}")
         
         results = []
-        
         print(f"  Procesando {len(r1_sets)} sets de Ronda 1")
         
         total_sensors = 0
         for set_id in sorted(r1_sets):
-            set_config = sets_config.get(float(set_id), {})
-            set_sensors = set_config.get('sensors', [])
-            set_raised = set_config.get('raised', [])
+            # Usar helpers para obtener configuración del set
+            set_sensors = self._get_set_sensors(set_id)
+            set_raised = self._get_set_raised(set_id)
+            set_discarded = self._get_set_discarded(set_id)
             
             if not set_raised:
                 print(f"  Advertencia: Set {set_id} no tiene sensores raised")
                 continue
             
             # Para cada sensor normal del set R1
-            set_discarded = set_config.get('discarded', [])
             
             for sensor in set_sensors:
                 total_sensors += 1
@@ -622,7 +687,7 @@ class Tree:
                     
                     # Offset total: sensor→ref_raised + ref_raised→referencia
                     total_offset = offset_raised + offset_chain
-                    total_error = np.sqrt(error_raised**2 + error_chain**2)
+                    total_error = propagate_error(error_raised, error_chain)
                     
                     results.append({
                         'Sensor': sensor,
@@ -671,30 +736,24 @@ class Tree:
         df = pd.DataFrame(results)
         df = df.sort_values(['Set', 'Sensor'])
         
+        # Usar helper para imprimir resumen
+        self._print_calibration_summary(df, "=== RESULTADOS ===")
+        
+        # Estadísticas adicionales específicas de este método
         calculated = df[df['Status'] == 'Calculado']
-        discarded = df[df['Status'] == 'Sensor descartado']
-        no_connection = df[df['Status'] == 'Sin conexión']
-        
-        print(f"\n=== RESULTADOS ===")
-        print(f"Total sensores R1 procesados: {total_sensors}")
-        print(f"Calculados exitosamente: {len(calculated)}")
-        print(f"Sensores descartados: {len(discarded)}")
-        print(f"Sin conexión: {len(no_connection)}")
-        
         if len(calculated) > 0:
-            print(f"\nEstadísticas de offsets:")
+            print("\nEstadísticas de offsets:")
             print(f"  Promedio: {calculated['Constante_Calibracion_K'].mean():.4f} K")
             print(f"  Desv. Std: {calculated['Constante_Calibracion_K'].std():.4f} K")
             print(f"  Min: {calculated['Constante_Calibracion_K'].min():.4f} K")
             print(f"  Max: {calculated['Constante_Calibracion_K'].max():.4f} K")
-            print(f"\nEstadísticas de errores:")
-            print(f"  Promedio: {calculated['Error_K'].mean():.5f} K")
-            print(f"  Max: {calculated['Error_K'].max():.5f} K")
+        
+        print(f"Total sensores R1 procesados: {total_sensors}")
         
         return df
     
-    def calculate_all_offsets_with_steps(self, reference_set: float = None, 
-                                         r1_sets_range: tuple = None) -> tuple:
+    def calculate_all_offsets_with_steps(self, reference_set: Optional[float] = None, 
+                                         r1_sets_range: Optional[tuple] = None) -> tuple:
         """
         Calcula offsets y genera CSV con pasos intermedios detallados.
         
@@ -710,36 +769,24 @@ class Tree:
         
         print(f"\nCalculando offsets CON PASOS DETALLADOS respecto a Set {reference_set}")
         
-        # Determinar qué sets R1 procesar
-        if r1_sets_range:
-            print(f"  Limitando a sets R1 del {r1_sets_range[0]} al {r1_sets_range[1]}")
-            r1_sets = self.sets_by_round.get(1, [])
-            r1_sets = [s for s in r1_sets if r1_sets_range[0] <= s <= r1_sets_range[1]]
-        else:
-            r1_sets = self.get_r1_sets_for_r3_set(int(reference_set))
-            print(f"  Procesando {len(r1_sets)} sets R1 desde tree.yaml")
+        # Determinar sets R1 usando helper
+        r1_sets = self._determine_r1_sets(reference_set, r1_sets_range)
+        print(f"  Procesando {len(r1_sets)} sets de Ronda 1")
         
-        sets_config = self.config.get('sensors', {}).get('sets', {})
-        ref_config = sets_config.get(float(reference_set), {})
-        ref_sensors = ref_config.get('sensors', [])
-        
-        if not ref_sensors:
-            print(f"Error: Set {reference_set} no tiene sensores definidos")
+        # Obtener configuración de referencia usando helper
+        reference_sensor, _ = self._get_reference_info(reference_set)
+        if reference_sensor is None:
             return pd.DataFrame(), pd.DataFrame()
-        
-        reference_sensor = ref_sensors[0]
         print(f"  Referencia absoluta: Sensor {reference_sensor}")
         
         results_main = []
         results_steps = []
         
-        print(f"  Procesando {len(r1_sets)} sets de Ronda 1")
-        
         for set_id in sorted(r1_sets):
-            set_config = sets_config.get(float(set_id), {})
-            set_sensors = set_config.get('sensors', [])
-            set_raised = set_config.get('raised', [])
-            set_discarded = set_config.get('discarded', [])
+            # Usar helpers para obtener configuración del set
+            set_sensors = self._get_set_sensors(set_id)
+            set_raised = self._get_set_raised(set_id)
+            set_discarded = self._get_set_discarded(set_id)
             
             if not set_raised:
                 continue
@@ -807,7 +854,7 @@ class Tree:
                     
                     # Total: offset_0 + cadena
                     total_offset = offset_0 + offset_chain
-                    total_error = np.sqrt(error_0**2 + error_chain**2)
+                    total_error = propagate_error(error_0, error_chain)
                     
                     results_main.append({
                         'Sensor': sensor,
@@ -900,13 +947,8 @@ class Tree:
         df_main = pd.DataFrame(results_main).sort_values(['Set', 'Sensor'])
         df_steps = pd.DataFrame(results_steps).sort_values(['Set', 'Sensor'])
         
-        # Estadísticas
-        calculated = df_main[df_main['Status'] == 'Calculado']
-        discarded = df_main[df_main['Status'] == 'Sensor descartado']
-        no_connection = df_main[df_main['Status'] == 'Sin conexión']
-        
-        print(f"\n=== RESULTADOS ===")
-        print(f"Calculados: {len(calculated)} | Descartados: {len(discarded)} | Sin conexión: {len(no_connection)}")
+        # Imprimir resumen usando helper
+        self._print_calibration_summary(df_main, "=== RESULTADOS ===")
         print(f"CSV principal: {len(df_main)} filas")
         print(f"CSV pasos: {len(df_steps)} filas")
         
@@ -996,7 +1038,7 @@ class Tree:
                 
                 # Camino válido encontrado
                 total_offset = offset_1 + offset_2 + offset_3
-                total_error = np.sqrt(error_1**2 + error_2**2 + error_3**2)
+                total_error = propagate_error(error_1, error_2, error_3)
                 
                 path_info = {
                     'raised_r1': raised_local,
@@ -1014,8 +1056,8 @@ class Tree:
         
         return valid_paths
     
-    def calculate_all_offsets_multi_path(self, reference_set: float = None, 
-                                         r1_sets_range: tuple = None) -> pd.DataFrame:
+    def calculate_all_offsets_multi_path(self, reference_set: Optional[float] = None, 
+                                         r1_sets_range: Optional[tuple] = None) -> pd.DataFrame:
         """
         Analiza todos los caminos posibles para cada sensor y calcula:
         1. Constante por camino de error mínimo
@@ -1032,34 +1074,27 @@ class Tree:
         if reference_set is None:
             reference_set = self._get_reference_set()
         
-        print(f"\n=== ANÁLISIS MULTI-CAMINO ===")
-        print(f"Explorando TODOS los caminos posibles para cada sensor\n")
+        print("\n=== ANÁLISIS MULTI-CAMINO ===")
+        print("Explorando TODOS los caminos posibles para cada sensor\n")
         
-        # Determinar qué sets R1 procesar
-        if r1_sets_range:
-            r1_sets = self.sets_by_round.get(1, [])
-            r1_sets = [s for s in r1_sets if r1_sets_range[0] <= s <= r1_sets_range[1]]
-        else:
-            r1_sets = self.get_r1_sets_for_r3_set(int(reference_set))
+        # Determinar sets R1 usando helper
+        r1_sets = self._determine_r1_sets(reference_set, r1_sets_range)
         
-        sets_config = self.config.get('sensors', {}).get('sets', {})
-        ref_config = sets_config.get(float(reference_set), {})
-        ref_sensors = ref_config.get('sensors', [])
-        
-        if not ref_sensors:
+        # Obtener referencia usando helper
+        reference_sensor, _ = self._get_reference_info(reference_set)
+        if reference_sensor is None:
             return pd.DataFrame()
         
-        reference_sensor = ref_sensors[0]
         print(f"Referencia absoluta: Sensor {reference_sensor} (Set {reference_set})")
         print(f"Procesando {len(r1_sets)} sets de Ronda 1\n")
         
         results = []
         
         for set_id in sorted(r1_sets):
-            set_config = sets_config.get(float(set_id), {})
-            set_sensors = set_config.get('sensors', [])
-            set_raised = set_config.get('raised', [])
-            set_discarded = set_config.get('discarded', [])
+            # Usar helpers para obtener configuración del set
+            set_sensors = self._get_set_sensors(set_id)
+            set_raised = self._get_set_raised(set_id)
+            set_discarded = self._get_set_discarded(set_id)
             
             if not set_raised:
                 continue
@@ -1156,7 +1191,7 @@ class Tree:
                     all_paths = []
                     for offset_ref, error_ref, path_info in paths_ref:
                         total_offset = offset_0 + offset_ref
-                        total_error = np.sqrt(error_0**2 + error_ref**2)
+                        total_error = propagate_error(error_0, error_ref)
                         all_paths.append((total_offset, total_error, path_info))
                     
                     # Calcular estadísticas
@@ -1259,28 +1294,29 @@ class Tree:
         
         df = pd.DataFrame(results).sort_values(['Set', 'Sensor'])
         
-        # Estadísticas globales
+        # Imprimir resumen básico usando helper
+        self._print_calibration_summary(df, "=== RESULTADOS MULTI-CAMINO ===")
+        
+        # Estadísticas específicas de multi-camino
         calculated = df[df['Status'] == 'Calculado']
         
         if len(calculated) > 0:
-            print(f"\n=== RESULTADOS MULTI-CAMINO ===")
-            print(f"Sensores analizados: {len(calculated)}")
             print(f"Caminos promedio por sensor: {calculated['N_Caminos'].mean():.1f}")
             print(f"Sensores con múltiples caminos: {(calculated['N_Caminos'] > 1).sum()}")
             
-            print(f"\n=== Diferencias entre estrategias ===")
+            print("\n=== Diferencias entre estrategias ===")
             diff_primer_vs_minErr = np.abs(calculated['Constante_Primer_Camino_K'] - calculated['Constante_Min_Error_K'])
             diff_primer_vs_media = np.abs(calculated['Constante_Primer_Camino_K'] - calculated['Constante_Media_Ponderada_K'])
             
-            print(f"Primer camino vs Min Error:")
+            print("Primer camino vs Min Error:")
             print(f"  Diferencia promedio: {diff_primer_vs_minErr.mean():.6f} K")
             print(f"  Diferencia máxima: {diff_primer_vs_minErr.max():.6f} K")
             
-            print(f"\nPrimer camino vs Media Ponderada:")
+            print("\nPrimer camino vs Media Ponderada:")
             print(f"  Diferencia promedio: {diff_primer_vs_media.mean():.6f} K")
             print(f"  Diferencia máxima: {diff_primer_vs_media.max():.6f} K")
             
-            print(f"\n=== Variabilidad entre caminos ===")
+            print("\n=== Variabilidad entre caminos ===")
             print(f"Std promedio entre caminos: {calculated['Std_Entre_Caminos_K'].mean():.6f} K")
             print(f"Max diferencia promedio: {calculated['Max_Diff_Caminos_K'].mean():.6f} K")
             

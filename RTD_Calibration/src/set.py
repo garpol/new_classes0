@@ -1,19 +1,22 @@
 """
-Clase Set simplificada - Agrupa múltiples runs del mismo set de calibración.
+Clase Set - Agrupa múltiples runs del mismo set de calibración.
 
 Responsabilidades:
-- Agrupar runs por CalibSetNumber
-- Calcular constantes de calibración promediando offsets de todos los runs
-- Calcular errores asociados
+- Agrupar runs por CalibSetNumber del LogFile.csv
+- Filtrar runs inválidos (BAD, pre-calibración, etc.)
+- Calcular constantes de calibración (dentro de cada set) promediando offsets de todos los runs
+- Calcular errores asociados a los offsets (desviación estándar) de cada run dentro de cada set
+- Guardar resultados en un archivo Excel 
 """
 import numpy as np
 import pandas as pd
-import yaml
 from pathlib import Path
 try:
+    from .utils import load_config # relative import
     from .run import Run
     from .logfile import Logfile
 except ImportError:
+    from utils import load_config # absolute import
     from run import Run
     from logfile import Logfile
 
@@ -34,17 +37,17 @@ class Set:
         if logfile_df is not None:
             self.logfile = logfile_df
         elif logfile_path:
-            lf = Logfile(filepath=logfile_path)
-            self.logfile = lf.log_file
+            lf = Logfile(filepath=logfile_path) # inicio clase Logfile
+            self.logfile = lf.log_file # DataFrame del logfile
         else:
             # Ruta por defecto
-            repo_root = Path(__file__).parents[1]
-            default_path = repo_root / "data" / "LogFile.csv"
-            lf = Logfile(filepath=str(default_path))
-            self.logfile = lf.log_file
+            repo_root = Path(__file__).parents[1] # RTD_Calibration/
+            default_path = repo_root / "data" / "LogFile.csv" # RTD_Calibration/data/LogFile.csv
+            lf = Logfile(filepath=str(default_path)) #por defecto
+            self.logfile = lf.log_file 
         
         # Cargar configuración
-        self.config = self._load_config(config_path)
+        self.config = load_config(config_path)
         
         # Diccionario para almacenar runs agrupados por set
         self.runs_by_set = {}
@@ -53,40 +56,32 @@ class Set:
         self.calibration_constants = {}
         self.calibration_errors = {}
     
-    def _load_config(self, config_path):
-        """Carga la configuración desde un archivo YAML."""
-        if config_path is None:
-            repo_root = Path(__file__).parents[1]
-            config_path = repo_root / "config" / "config.yml"
-        
-        if not Path(config_path).exists():
-            print(f"Advertencia: No se encontró config en {config_path}")
-            return {}
-        
-        with open(config_path, 'r') as f:
-            return yaml.safe_load(f) or {}
-    
     def group_runs(self, selected_sets=None):
         """
         Agrupa los runs por CalibSetNumber.
         
         Args:
             selected_sets: Lista de sets a procesar (None = todos)
+        
+        Notes:
+            CalibSetNumber en logfile puede ser:
+            - Numérico (como string): "0", "1", "2", ..., "63"
+            - Especial (con texto): "FRAME_SET1", "FRAME_SET2", "RESIST_SET"
+            
+            Esta función convierte temporalmente a numérico (no modifica original)
+            y filtra solo valores enteros positivos 1-63 (ignora set 0 y especiales).
         """
         print("\n=== Agrupando runs por CalibSetNumber ===")
         
-        # Convertir CalibSetNumber a numérico
-        self.logfile["CalibSetNumber"] = pd.to_numeric(
-            self.logfile["CalibSetNumber"], 
-            errors='coerce'
-        )
+        # Convertir CalibSetNumber a numérico TEMPORALMENTE (no modifica self.logfile)
+        calib_set_numeric = pd.to_numeric(self.logfile["CalibSetNumber"], errors='coerce')
         
-        # Obtener sets únicos (solo números enteros positivos)
-        all_sets = self.logfile["CalibSetNumber"].dropna().unique()
-        all_sets = [s for s in all_sets if s > 0 and s == int(s) and len(str(int(s))) <= 2]
-        all_sets = sorted(all_sets)
+        # Obtener sets válidos: numéricos enteros entre 1-63
+        valid_nums = calib_set_numeric.dropna()
+        valid_sets = valid_nums[(valid_nums > 0) & (valid_nums % 1 == 0) & (valid_nums <= 63)]
+        all_sets = sorted(valid_sets.unique())
         
-        # Filtrar por selected_sets si se especifica
+        # Aplicar filtro de sets seleccionados si existe
         if selected_sets:
             all_sets = [s for s in all_sets if s in selected_sets]
         
@@ -95,32 +90,34 @@ class Set:
         # Palabras clave a excluir en filenames
         exclude_keywords = ['pre', 'st', 'lar']
         
+        # Procesar cada set
         for set_num in all_sets:
             print(f"\nProcesando Set {set_num}")
-            runs_in_set = self.logfile[self.logfile["CalibSetNumber"] == set_num]
             
+            # Filtrar runs del set y crear copia 
+            runs_df = self.logfile[calib_set_numeric == set_num].copy()
+            
+            # Aplicar exclusiones con operaciones pandas
+            filename_mask = runs_df['Filename'].str.lower().apply(
+                lambda x: isinstance(x, str) and not any(kw in x for kw in exclude_keywords)
+            ) # True si no contiene keywords excluyentes
+            valid_mask = filename_mask & (runs_df['Selection'] != 'BAD')
+            
+            # Crear instancias de Run para archivos válidos
             valid_runs = {}
-            for _, row in runs_in_set.iterrows():
-                filename = row["Filename"]
-                selection = row["Selection"]
-                
-                # Filtrar por palabras clave y selección BAD
-                if not isinstance(filename, str):
-                    continue
-                if any(kw in filename.lower() for kw in exclude_keywords):
-                    print(f"  Excluido (keywords): {filename}")
-                    continue
-                if selection == "BAD":
-                    print(f"  Excluido (BAD): {filename}")
-                    continue
-                
-                # Crear instancia de Run con configuración
+            for filename in runs_df[valid_mask]['Filename']:
                 try:
                     run = Run(filename, self.logfile, config=self.config)
-                    valid_runs[filename] = run
+                    valid_runs[filename] = run # Almacenar instancia de Run
                     print(f"  Incluido: {filename}")
-                except Exception as e:
+                except (FileNotFoundError, pd.errors.EmptyDataError, ValueError, KeyError) as e:
                     print(f"  Error en {filename}: {e}")
+            
+            # Reportar exclusiones
+            for filename in runs_df[~valid_mask]['Filename']:
+                if isinstance(filename, str):
+                    reason = 'keywords' if any(kw in filename.lower() for kw in exclude_keywords) else 'BAD'
+                    print(f"  Excluido ({reason}): {filename}")
             
             if valid_runs:
                 self.runs_by_set[set_num] = valid_runs
@@ -140,7 +137,7 @@ class Set:
         """
         print("\n=== Calculando constantes de calibración ===")
         
-        sets_to_process = selected_sets if selected_sets else list(self.runs_by_set.keys())
+        sets_to_process = selected_sets if selected_sets else list(self.runs_by_set.keys()) # Todos los sets con runs
         
         for set_num in sets_to_process:
             if set_num not in self.runs_by_set:
@@ -148,20 +145,26 @@ class Set:
                 continue
             
             print(f"\nSet {set_num}:")
-            runs = self.runs_by_set[set_num]
+            runs = self.runs_by_set[set_num] 
             
             # Recolectar offsets y errores de todos los runs
             offsets_list = []
             errors_list = []
+            sensor_names = None  # Guardar nombres de sensores del primer run
             
             for filename, run in runs.items():
                 try:
-                    offsets = run.calculate_offsets()
-                    errors = run.calculate_offset_errors()
+                    # calculate_offsets ahora retorna (offsets, errors)
+                    offsets, errors = run.calculate_offsets()
                     offsets_list.append(offsets.values)
                     errors_list.append(errors.values)
+                    
+                    # Guardar nombres de sensores del primer run válido
+                    if sensor_names is None:
+                        sensor_names = list(offsets.index)
+                    
                     print(f"  ✓ {filename}")
-                except Exception as e:
+                except (AttributeError, ValueError, KeyError) as e:
                     print(f"  ✗ Error en {filename}: {e}")
             
             if not offsets_list:
@@ -172,31 +175,27 @@ class Set:
             offsets_array = np.array(offsets_list)  # shape: (n_runs, n_sensors, n_sensors)
             errors_array = np.array(errors_list)
             
-            # Calcular promedio ponderado por inverso del error al cuadrado
-            # Donde error = 0 o NaN, usar peso = 0
-            weights = np.zeros_like(errors_array)
-            mask_valid = (errors_array > 0) & np.isfinite(errors_array) & np.isfinite(offsets_array)
-            weights[mask_valid] = 1.0 / (errors_array[mask_valid] ** 2)
+            # Calcular promedio ponderado por inverso del error al cuadrado. Donde error = 0 o NaN, usar peso = 0
+            weights = np.zeros_like(errors_array) # Inicializar pesos
+            mask_valid = (errors_array > 0) & np.isfinite(errors_array) & np.isfinite(offsets_array) # Máscara para valores válidos 
+            weights[mask_valid] = 1.0 / (errors_array[mask_valid] ** 2) # Inverso del error al cuadrado
             
             # Promedio ponderado
-            weighted_sum = np.sum(offsets_array * weights, axis=0)
-            total_weights = np.sum(weights, axis=0)
+            weighted_sum = np.sum(offsets_array * weights, axis=0) # Suma ponderada de offsets 
+            total_weights = np.sum(weights, axis=0) # Suma de pesos
             
-            # Evitar división por cero
+            # Evitar división por cero con np.divide y obtener constantes de calibración 
             constants = np.divide(
                 weighted_sum, 
                 total_weights, 
                 out=np.full_like(weighted_sum, np.nan),
                 where=total_weights > 0
-            )
+            ) # shape: (n_sensors, n_sensors)
             
             # Error = desviación estándar de los offsets
-            errors = np.std(offsets_array, axis=0, ddof=1)
+            errors = np.std(offsets_array, axis=0, ddof=1) # shape: (n_sensors, n_sensors)
             
             # Convertir a DataFrames con nombres de sensores
-            first_run = list(runs.values())[0]
-            sensor_names = list(first_run.temperature_data.columns)
-            
             constants_df = pd.DataFrame(constants, index=sensor_names, columns=sensor_names)
             errors_df = pd.DataFrame(errors, index=sensor_names, columns=sensor_names)
             
@@ -204,12 +203,12 @@ class Set:
             self.calibration_errors[set_num] = errors_df
             
             print(f"  Constantes calculadas: {constants_df.shape}")
-            print(f"  Promedio de offsets: {np.nanmean(np.abs(constants)):.4f} K")
-            print(f"  Error promedio: {np.nanmean(errors):.4f} K")
+            print(f"  Promedio de offsets: {np.nanmean(np.abs(constants)):.4e} K")
+            print(f"  Error promedio: {np.nanmean(errors):.4e} K")
         
         print(f"\nTotal sets con constantes: {len(self.calibration_constants)}")
     
-    def save_results(self, output_file="calibration_results.xlsx"):
+    def save_results(self, output_file="set_calibration_results.xlsx"):
         """
         Guarda los resultados en un archivo Excel.
         
