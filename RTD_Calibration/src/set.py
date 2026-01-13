@@ -130,7 +130,9 @@ class Set:
         Calcula matrices NxN de offsets entre sensores dentro del mismo set.
         
         NOTA IMPORTANTE:
-        Estas constantes son PROVISIONALES y se usan como input para la clase Tree.
+        Estas constantes son PROVISIONALES (se calculan respecto de todos los sensores y no solo de los 'raised') 
+        y se usan como input para la clase Tree.
+
         Tree es quien calcula las constantes de calibración FINALES de forma escalonada:
           - Encadena offsets a través de sensores 'raised' entre sets de diferentes rondas
           - Pondera múltiples caminos para cada sensor

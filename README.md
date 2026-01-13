@@ -1,152 +1,80 @@
-# RTD Calibration System# RTD Calibration System
+# RTD Calibration System
 
+Multi-round calibration system for RTD temperature sensors using weighted average method.
 
+## About
 
-Multi-round calibration system for RTD temperature sensors using weighted average method.Multi-round calibration system for RTD temperature sensors using weighted average method.
+This project calculates calibration constants for RTD (Resistance Temperature Detector) sensors organized in sets across multiple calibration rounds. The system processes data from three rounds (R1 → R2 → R3) and finds all possible calibration paths from each sensor to the reference sensor.
 
+Main features:
+- Processes multiple calibration rounds with hierarchical structure
+- Calculates calibration constants using weighted average (1/error²)
+- Explores all valid paths between sensors and reference
+- Handles "raised" sensors with special calibration logic
+- Generates CSV files ready to use
+- **Automatic structure derivation** from config.yml (no need for tree.yaml!)
 
+## Project Structure
 
-## About## About
+```
+RTD_Calibration/
+├── config/
+│   ├── config.yml              # Main configuration (sets, sensors, rounds)
+│   └── reference_sensors.yaml  # Reference sensor definition
+├── data/
+│   ├── LogFile.csv            # Temperature files registry
+│   ├── temperature_files/     # Raw temperature data
+│   └── results/               # Output CSVs
+├── src/
+│   ├── set.py                 # Set processing (local offsets)
+│   ├── tree.py                # Network construction (global offsets)
+│   ├── run.py                 # Run processing
+│   ├── logfile.py             # LogFile management
+│   └── utils.py               # Helper functions
+├── notebooks/
+│   ├── SET.ipynb              # Individual set analysis
+│   ├── RUN.ipynb              # Run analysis
+│   └── TREE.ipynb             # Complete tree analysis (MAIN)
+└── main.py                    # Production script
+```
 
+## How to Use
 
+### Running the Main Script
 
-This project calculates calibration constants for RTD (Resistance Temperature Detector) sensors organized in sets across multiple calibration rounds. The system processes data from three rounds (R1 → R2 → R3) and finds all possible calibration paths from each sensor to the reference sensor.This project calculates calibration constants for RTD (Resistance Temperature Detector) sensors organized in sets across multiple calibration rounds. The system processes data from three rounds (R1 → R2 → R3) and finds all possible calibration paths from each sensor to the reference sensor.
+The `main.py` script processes all sets and generates calibration constants:
 
-
-
-Main features:Main features:
-
-- Processes multiple calibration rounds with hierarchical structure- Processes multiple calibration rounds with hierarchical structure
-
-- Calculates calibration constants using weighted average (1/error²)- Calculates calibration constants using weighted average (1/error²)
-
-- Explores all valid paths between sensors and reference- Explores all valid paths between sensors and reference
-
-- Handles "raised" sensors with special calibration logic- Handles "raised" sensors with special calibration logic
-
-- Generates CSV files ready to use- Generates CSV files ready to use
-
-
-
-## Project Structure## Project Structure
-
-
-
-``````
-
-RTD_Calibration/RTD_Calibration/
-
-├── config/├── config/
-
-│   ├── config.yml              # Main configuration (sets, sensors, rounds)│   ├── config.yml              # Main configuration (sets, sensors, rounds)
-
-│   └── tree.yaml              # Calibration tree structure│   └── tree.yaml              # Calibration tree structure
-
-├── data/├── data/
-
-│   ├── LogFile.csv            # Temperature files registry│   ├── LogFile.csv            # Temperature files registry
-
-│   ├── temperature_files/     # Raw temperature data│   ├── temperature_files/     # Raw temperature data
-
-│   └── results/               # Output CSVs│   └── results/               # Output CSVs
-
-├── src/├── src/
-
-│   ├── set.py                 # Set processing│   ├── set.py                 # Set processing
-
-│   ├── tree.py                # Tree construction and multi-path calculation│   ├── tree.py                # Tree construction and multi-path calculation
-
-│   ├── run.py                 # Run processing│   ├── run.py                 # Run processing
-
-│   └── logfile.py             # LogFile management│   └── logfile.py             # LogFile management
-
-├── notebooks/├── notebooks/
-
-│   ├── SET.ipynb              # Individual set analysis│   ├── SET.ipynb              # Individual set analysis
-
-│   ├── RUN.ipynb              # Run analysis│   ├── RUN.ipynb              # Run analysis
-
-│   └── TREE.ipynb             # Complete tree analysis (MAIN)│   └── TREE.ipynb             # Complete tree analysis (MAIN)
-
-└── main.py                    # Production script└── main.py                    # Production script
-
-``````
-
-
-
-## How to Use## How to Use
-
-
-
-### Running the Main Script### Running the Main Script
-
-
-
-```bashThe `main.py` script processes all sets and generates calibration constants:
-
-# Process default range (sets 3-39, complete Round 1)
-
-python main.py```bash
-
+```bash
 # Procesar sets por defecto (3-39, Ronda 1 completa)
-
-# Process specific rangepython main.py
-
-python main.py --range 3 39
+python main.py
 
 # Procesar rango específico
+python main.py --range 3 39
 
-# Process specific setspython main.py --range 3 39
-
+# Procesar sets específicos
 python main.py --sets 3 4 5 49 57
+```
 
-```# Procesar sets específicos
+### Salidas Generadas
 
-python main.py --sets 3 4 5 49 57
+El script genera dos archivos CSV en `data/results/`:
 
-### Output Files```
-
-
-
-Two CSV files are generated in `data/results/`:### Salidas Generadas
-
-
-
-1. **calibration_analisis_multicamino.csv** - Complete analysis with 3 strategies:El script genera dos archivos CSV en `data/results/`:
-
-   - First path
-
-   - Minimum error path  1. **`calibration_analisis_multicamino.csv`**: Análisis completo con 3 estrategias
-
-   - Weighted average (recommended)   - Primer camino
-
+1. **`calibration_analisis_multicamino.csv`**: Análisis completo con 3 estrategias
+   - Primer camino
    - Camino de mínimo error
-
-2. **calibration_constants_media_ponderada.csv** - Simplified CSV for final use   - **Media ponderada (RECOMENDADO)**
-
-   - Columns: Sensor, Set, Constante_Calibracion_K, Error_K, N_Caminos
+   - **Media ponderada (RECOMENDADO)**
 
 2. **`calibration_constants_media_ponderada.csv`**: CSV simplificado para uso final
+   - Columnas: Sensor, Set, Constante_Calibracion_K, Error_K, N_Caminos
 
-### Using Notebooks   - Columnas: Sensor, Set, Constante_Calibracion_K, Error_K, N_Caminos
+### Análisis Interactivo con Notebooks
 
-
-
-For interactive exploration:### Análisis Interactivo con Notebooks
-
-
-
-1. **SET.ipynb** - Analyze individual setsPara exploración y visualización, usar los notebooks en orden:
-
-2. **TREE.ipynb** - Complete multi-round analysis (main notebook)
+Para exploración y visualización, usar los notebooks en orden:
 
 1. **`SET.ipynb`**: Analizar un set individual
+2. **`TREE.ipynb`**: Análisis completo multi-ronda (PRINCIPAL)
 
-## Method2. **`TREE.ipynb`**: Análisis completo multi-ronda (PRINCIPAL)
-
-
-
-### Calibration Structure## 📊 Metodología
+## 📊 Metodología
 
 
 
@@ -283,23 +211,35 @@ Universidad Politécnica de Madrid      discarded: [48060, 48176]
     # ... más sets
 ```
 
-### `config/tree.yaml`
+### Derivación Automática de Estructura
 
-Define las conexiones entre rondas y sets:
+**El sistema ya NO usa `tree.yaml`**. La estructura de rondas se deriva automáticamente de `config.yml`:
 
-```yaml
-ronda_1:
-  set_ids: [3.0, 4.0, ..., 39.0]
-  next_ronda: ronda_2
-ronda_2:
-  set_ids: [49.0, 50.0, ..., 54.0]
-  next_ronda: ronda_3
-ronda_3:
-  set_ids: [57.0]
-  reference_sensor: 48484
-```
+- **Detección de padres**: Los sets identifican a sus padres comparando sensores "raised" entre rondas
+- **Filtrado por ronda**: Solo se conectan sets de rondas consecutivas (R2→R1, R3→R2)
+- **Referencia**: Definida en `config/reference_sensors.yaml`
+
+**Ejemplo**: Set 57 (R3) detecta automáticamente sus 6 padres en R2 porque comparte sensores raised con ellos.
 
 ## 📝 Notas Importantes
+
+### Diferencia: Set vs Tree
+
+**Para estudiantes**: Es importante entender la distinción:
+
+- **Set** (`set.py`): Procesa UN SOLO set de calibración (ej: CalSetN_3)
+  - Lee archivos de temperatura de ese set
+  - Calcula offsets LOCALES (dentro del set)
+  - Promedia mediciones pre/post
+  - Maneja sensores raised, regulares y descartados
+
+- **Tree** (`tree.py`): Conecta TODOS los sets formando una red de calibración
+  - Deriva automáticamente la estructura de rondas de config.yml
+  - Encuentra caminos desde cada sensor hasta la referencia (48484)
+  - Calcula offsets GLOBALES (cadena multi-ronda)
+  - Hace media ponderada de todos los caminos disponibles
+
+**Flujo típico**: Set (offsets locales) → Tree (cadena global) → Constantes finales
 
 ### Sensores Raised
 

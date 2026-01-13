@@ -26,7 +26,7 @@ TODO LIST:
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 import os
 import yaml
 try:
@@ -51,7 +51,6 @@ class Tree:
         """
         self.sets = sets_dict
         self.config = load_config(config_path)
-        self.tree_config = self._load_tree_config()
         
         # Almacenar offsets calculados: {(sensor_origen, sensor_destino): (offset, error)}
         self.offsets: Dict[Tuple[int, int], Tuple[float, float]] = {}
@@ -60,25 +59,55 @@ class Tree:
         self.sets_by_round: Dict[int, List[float]] = {1: [], 2: [], 3: []}
         self._classify_sets_by_round()
     
-    def _load_tree_config(self) -> dict:
-        """Carga la estructura del árbol desde tree.yaml"""
-        try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            tree_path = os.path.join(current_dir, '..', 'config', 'tree.yaml')
+    def _find_parent_sets(self, target_set_id: float) -> List[float]:
+        """
+        Encuentra los sets "parent" de un set dado analizando qué sets tienen
+        sensores raised que aparecen como sensores normales en el target_set.
+        
+        Solo retorna parents de la ronda INMEDIATAMENTE ANTERIOR (no salta rondas).
+        
+        Deriva la estructura del árbol automáticamente desde config.yml.
+        
+        Args:
+            target_set_id: ID del set para el cual buscar parents
+        
+        Returns:
+            Lista de IDs de sets parent (ronda inmediatamente anterior)
+        """
+        sets_config = self.config.get('sensors', {}).get('sets', {})
+        target_config = sets_config.get(float(target_set_id), {})
+        target_sensors = set(target_config.get('sensors', []))
+        target_round = target_config.get('round', 0)
+        
+        # La ronda parent debe ser inmediatamente anterior
+        parent_round = target_round - 1
+        if parent_round < 1:
+            return []  # No hay ronda anterior
+        
+        parents = []
+        
+        # Buscar sets de la ronda anterior cuyo 'raised' contenga sensores del target_set
+        for set_id, set_config in sets_config.items():
+            if set_id == target_set_id:
+                continue
             
-            with open(tree_path, 'r', encoding='utf-8') as f:
-                tree_data = yaml.safe_load(f)
+            # Filtrar solo sets de la ronda parent
+            set_round = set_config.get('round', 0)
+            if set_round != parent_round:
+                continue
             
-            print("\n✓ Estructura del árbol cargada desde tree.yaml")
-            return tree_data
-        except (FileNotFoundError, yaml.YAMLError, OSError) as e:
-            print(f"Advertencia: No se pudo cargar tree.yaml: {e}")
-            return {}
+            raised_sensors = set(set_config.get('raised', []))
+            
+            # Si algún raised de este set está en el target, es un parent
+            if raised_sensors & target_sensors:  # Intersección
+                parents.append(float(set_id))
+        
+        return sorted(parents)
     
     def get_r1_sets_for_r3_set(self, r3_set_id: int) -> List[int]:
         """
         Obtiene la lista de sets R1 que están relacionados con un set R3.
-        Usa tree.yaml para determinar la estructura R1 → R2 → R3.
+        Deriva la estructura R1 → R2 → R3 automáticamente desde config.yml.
         
         Args:
             r3_set_id: ID del set de ronda 3
@@ -86,20 +115,16 @@ class Tree:
         Returns:
             Lista de IDs de sets de ronda 1 relacionados
         """
-        tree_sets = self.tree_config.get('sets', {})
-        r3_config = tree_sets.get(r3_set_id, {})
-        
         # Obtener parents de R3 (sets R2)
-        r2_sets = r3_config.get('parents', [])
+        r2_sets = self._find_parent_sets(float(r3_set_id))
         
         # Para cada set R2, obtener sus parents (sets R1)
         r1_sets = []
         for r2_id in r2_sets:
-            r2_config = tree_sets.get(r2_id, {})
-            r1_from_r2 = r2_config.get('parents', [])
+            r1_from_r2 = self._find_parent_sets(r2_id)
             r1_sets.extend(r1_from_r2)
         
-        return sorted(list(set(r1_sets)))  # Eliminar duplicados y ordenar
+        return sorted(list(set(int(s) for s in r1_sets)))  # Eliminar duplicados y ordenar
     
     def _classify_sets_by_round(self):
         """Clasifica los sets según su ronda usando config.yml"""
@@ -107,7 +132,7 @@ class Tree:
         
         for set_id in self.sets.keys():
             set_config = sets_config.get(float(set_id), {})
-            round_num = set_config.get('round', 1)
+            round_num = set_config.get('round', 1) # Default a ronda 1 si no está especificado
             
             if round_num in self.sets_by_round:
                 self.sets_by_round[round_num].append(set_id)
@@ -121,36 +146,91 @@ class Tree:
                 print(f"  Ronda {round_num}: {len(sets)} sets -> {sets}")
     
     # =========================================================================
-    # HELPERS para reducir duplicación en calculate_all_offsets_*
+    # HELPERS para lógica compleja
     # =========================================================================
     
-    def _get_sets_config(self):
-        """Retorna la configuración de sets desde config.yml"""
-        return self.config.get('sensors', {}).get('sets', {})
+    def _create_result_record(self, sensor: int, set_id: float, round_num: int,
+                             offset: Optional[float] = None, error: Optional[float] = None,
+                             status: str = 'Sin conexión') -> dict:
+        """
+        Crea un registro de resultado para agregar al DataFrame.
+        Reduce duplicación de código en calculate_all_offsets_*.
+        
+        Args:
+            sensor: ID del sensor
+            set_id: ID del set
+            round_num: Número de ronda
+            offset: Offset calculado (None = NaN)
+            error: Error calculado (None = NaN)
+            status: Estado del cálculo ('Calculado', 'Sin conexión', 'Descartado', 'Referencia')
+        
+        Returns:
+            Diccionario con estructura estandarizada para el DataFrame
+        """
+        return {
+            'Sensor': sensor,
+            'Set': set_id,
+            'Round': round_num,
+            'Constante_Calibracion_K': offset if offset is not None else np.nan,
+            'Error_K': error if error is not None else np.nan,
+            'Status': status
+        }
     
-    def _get_set_info(self, set_id: float) -> dict:
-        """Obtiene la configuración completa de un set"""
-        return self._get_sets_config().get(float(set_id), {})
-    
-    def _get_set_sensors(self, set_id: float) -> list:
-        """Obtiene la lista de sensores normales de un set"""
-        return self._get_set_info(set_id).get('sensors', [])
-    
-    def _get_set_raised(self, set_id: float) -> list:
-        """Obtiene la lista de sensores raised de un set"""
-        return self._get_set_info(set_id).get('raised', [])
-    
-    def _get_set_discarded(self, set_id: float) -> list:
-        """Obtiene la lista de sensores descartados de un set"""
-        return self._get_set_info(set_id).get('discarded', [])
+    def _create_multipath_result_record(self, sensor: int, set_id: float, 
+                                       n_paths: int = 0,
+                                       first_offset: Optional[float] = None,
+                                       first_error: Optional[float] = None,
+                                       min_offset: Optional[float] = None,
+                                       min_error: Optional[float] = None,
+                                       weighted_offset: Optional[float] = None,
+                                       weighted_error: Optional[float] = None,
+                                       std_paths: Optional[float] = None,
+                                       max_diff: Optional[float] = None,
+                                       status: str = 'Sin conexión') -> dict:
+        """
+        Crea un registro de resultado con estadísticas multi-camino.
+        Reduce duplicación en calculate_all_offsets_multi_path.
+        
+        Args:
+            sensor: ID del sensor
+            set_id: ID del set
+            n_paths: Número de caminos encontrados
+            first_offset: Offset del primer camino
+            first_error: Error del primer camino
+            min_offset: Offset del camino con menor error
+            min_error: Error mínimo
+            weighted_offset: Offset de la media ponderada
+            weighted_error: Error de la media ponderada
+            std_paths: Desviación estándar entre caminos
+            max_diff: Diferencia máxima entre caminos
+            status: Estado del cálculo
+        
+        Returns:
+            Diccionario con estructura para DataFrame multi-camino
+        """
+        return {
+            'Sensor': sensor,
+            'Set': set_id,
+            'Round': 1,
+            'N_Caminos': n_paths,
+            'Constante_Primer_Camino_K': first_offset if first_offset is not None else np.nan,
+            'Error_Primer_Camino_K': first_error if first_error is not None else np.nan,
+            'Constante_Min_Error_K': min_offset if min_offset is not None else np.nan,
+            'Error_Min_K': min_error if min_error is not None else np.nan,
+            'Constante_Media_Ponderada_K': weighted_offset if weighted_offset is not None else np.nan,
+            'Error_Media_Ponderada_K': weighted_error if weighted_error is not None else np.nan,
+            'Std_Entre_Caminos_K': std_paths if std_paths is not None else np.nan,
+            'Max_Diff_Caminos_K': max_diff if max_diff is not None else np.nan,
+            'Status': status
+        }
     
     def _determine_r1_sets(self, reference_set: float, r1_sets_range: Optional[tuple] = None) -> list:
         """
-        Determina qué sets R1 procesar según el modo (manual con rango o automático con tree.yaml)
+        Determina qué sets R1 procesar según el modo (manual con rango o automático desde config.yml)
         
         Args:
             reference_set: Set de referencia R3
-            r1_sets_range: Tupla (min, max) para modo manual, None para automático
+            r1_sets_range: Tupla (min, max) para modo manual, None para automático desde config.yml
         
         Returns:
             Lista de IDs de sets R1 a procesar
@@ -161,9 +241,9 @@ class Tree:
             r1_sets = self.sets_by_round.get(1, [])
             r1_sets = [s for s in r1_sets if r1_sets_range[0] <= s <= r1_sets_range[1]]
         else:
-            # Modo automático: usar tree.yaml
+            # Modo automático: derivar estructura desde config.yml
             r1_sets = self.get_r1_sets_for_r3_set(int(reference_set))
-            print(f"  Modo automático: Procesando {len(r1_sets)} sets R1 desde tree.yaml")
+            print(f"  Modo automático: Procesando {len(r1_sets)} sets R1 derivados desde config.yml")
             print(f"  Sets R1: {r1_sets}")
         return sorted(r1_sets)
     
@@ -174,14 +254,32 @@ class Tree:
         Returns:
             Tupla (reference_sensor, ref_sensors_list)
         """
-        ref_config = self._get_set_info(reference_set)
+        sets_config = self.config.get('sensors', {}).get('sets', {})
+        ref_config = sets_config.get(float(reference_set), {})
         ref_sensors = ref_config.get('sensors', [])
+        reference_sensors_config = ref_config.get('reference', [])
+        raised_sensors_config = ref_config.get('raised', [])
+        discarded_sensors_config = ref_config.get('discarded', [])
         
         if not ref_sensors:
             print(f"Error: Set {reference_set} no tiene sensores definidos")
             return None, []
         
-        reference_sensor = ref_sensors[0]
+        # Elegir el primer sensor que NO sea reference, raised ni discarded
+        # Queremos un sensor normal y válido del set
+        excluded = set(reference_sensors_config + raised_sensors_config + discarded_sensors_config)
+        
+        reference_sensor = None
+        for sensor in ref_sensors:
+            if sensor not in excluded:
+                reference_sensor = sensor
+                break
+        
+        # Si todos están excluidos (caso raro), usar el primero de todos modos
+        if reference_sensor is None:
+            reference_sensor = ref_sensors[0]
+            print(f"Advertencia: Todos los sensores del Set {reference_set} están marcados como reference/raised/discarded. Usando {reference_sensor}")
+        
         return reference_sensor, ref_sensors
     
     def _print_calibration_summary(self, df: pd.DataFrame, title: str):
@@ -200,7 +298,8 @@ class Tree:
         print(f"  Descartados: {len(discarded)}")
         print(f"  Sin conexión: {len(no_connection)}")
         
-        if len(calculated) > 0:
+        # Solo imprimir estadísticas de error si existe la columna Error_K
+        if len(calculated) > 0 and 'Error_K' in calculated.columns:
             print(f"  Error promedio: {calculated['Error_K'].mean():.4f} K")
             print(f"  Error máximo: {calculated['Error_K'].max():.4f} K")
     
@@ -581,7 +680,7 @@ class Tree:
             return total_offset, total_error
         
         # Ningún raised funcionó - mostrar por qué
-        print(f"  ✗ Sensor {sensor} Set {set_r1}: {'; '.join(failures[:2])}")
+        print(f"  Sensor {sensor} Set {set_r1}: {'; '.join(failures[:2])}")
         if return_steps:
             return None, None, None
         return None, None
@@ -592,7 +691,7 @@ class Tree:
         Calcula offsets de todos los sensores de Ronda 1 respecto a la referencia absoluta.
         
         Lógica:
-        - Usa tree.yaml para determinar qué sets R1 procesar según el set R3
+        - Deriva la estructura desde config.yml para determinar qué sets R1 procesar según el set R3
         - Para cada sensor: calcular offset respecto a su raised local
         - Encadenar: Sensor_R1 → Raised_R1 → Raised_R2 → Referencia_R3
         - Todos los sensores deben tener conexión (path garantizado)
@@ -600,7 +699,7 @@ class Tree:
         Args:
             reference_set: ID del set de referencia R3 (por defecto el de mayor ronda)
             r1_sets_range: Tupla (min, max) para limitar sets R1 a procesar. 
-                          Si no se especifica, usa tree.yaml para determinar sets R1
+                          Si no se especifica, deriva sets R1 desde config.yml
         
         Returns:
             DataFrame con offsets encadenados
@@ -625,10 +724,12 @@ class Tree:
         
         total_sensors = 0
         for set_id in sorted(r1_sets):
-            # Usar helpers para obtener configuración del set
-            set_sensors = self._get_set_sensors(set_id)
-            set_raised = self._get_set_raised(set_id)
-            set_discarded = self._get_set_discarded(set_id)
+            # Obtener configuración del set desde config
+            sets_config = self.config.get('sensors', {}).get('sets', {})
+            set_config = sets_config.get(float(set_id), {})
+            set_sensors = set_config.get('sensors', [])
+            set_raised = set_config.get('raised', [])
+            set_discarded = set_config.get('discarded', [])
             
             if not set_raised:
                 print(f"  Advertencia: Set {set_id} no tiene sensores raised")
@@ -641,14 +742,7 @@ class Tree:
                 
                 # Verificar si el sensor está descartado
                 if sensor in set_discarded:
-                    results.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': np.nan,
-                        'Error_K': np.nan,
-                        'Status': 'Sensor descartado'
-                    })
+                    results.append(self._create_result_record(sensor, set_id, 1, status='Sensor descartado'))
                     continue
                 
                 # Si es un sensor raised, calibrarlo respecto al OTRO raised del mismo set
@@ -658,14 +752,7 @@ class Tree:
                     
                     if not other_raised:
                         # Solo hay 1 raised en el set, no se puede calibrar
-                        results.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'Constante_Calibracion_K': np.nan,
-                            'Error_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results.append(self._create_result_record(sensor, set_id, 1))
                         continue
                     
                     # Calibrar raised respecto al otro raised (dentro del mismo set)
@@ -673,14 +760,7 @@ class Tree:
                     offset_raised, error_raised = self.get_offset_within_set(set_id, sensor, ref_raised)
                     
                     if offset_raised is None:
-                        results.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'Constante_Calibracion_K': np.nan,
-                            'Error_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results.append(self._create_result_record(sensor, set_id, 1))
                         continue
                     
                     # Ahora encadenar: ref_raised → raised_R2 → ref_R3
@@ -689,28 +769,15 @@ class Tree:
                     )
                     
                     if offset_chain is None:
-                        results.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'Constante_Calibracion_K': np.nan,
-                            'Error_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results.append(self._create_result_record(sensor, set_id, 1))
                         continue
                     
                     # Offset total: sensor→ref_raised + ref_raised→referencia
                     total_offset = offset_raised + offset_chain
                     total_error = propagate_error(error_raised, error_chain)
                     
-                    results.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': total_offset,
-                        'Error_K': total_error,
-                        'Status': 'Calculado'
-                    })
+                    results.append(self._create_result_record(sensor, set_id, 1, 
+                                                              total_offset, total_error, 'Calculado'))
                     continue
                 
                 # Calcular offset encadenado: sensor → raised_R1 → raised_R2 → ref_R3
@@ -719,33 +786,14 @@ class Tree:
                 )
                 
                 if offset is not None:
-                    results.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': offset,
-                        'Error_K': error,
-                        'Status': 'Calculado'
-                    })
+                    results.append(self._create_result_record(sensor, set_id, 1, 
+                                                              offset, error, 'Calculado'))
                 else:
-                    results.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': np.nan,
-                        'Error_K': np.nan,
-                        'Status': 'Sin conexión'
-                    })
+                    results.append(self._create_result_record(sensor, set_id, 1))
         
         # Agregar la referencia absoluta
-        results.append({
-            'Sensor': reference_sensor,
-            'Set': reference_set,
-            'Round': 3,
-            'Constante_Calibracion_K': 0.0,
-            'Error_K': 0.0,
-            'Status': 'Referencia'
-        })
+        results.append(self._create_result_record(reference_sensor, reference_set, 3, 
+                                                  0.0, 0.0, 'Referencia'))
         
         df = pd.DataFrame(results)
         df = df.sort_values(['Set', 'Sensor'])
@@ -797,10 +845,12 @@ class Tree:
         results_steps = []
         
         for set_id in sorted(r1_sets):
-            # Usar helpers para obtener configuración del set
-            set_sensors = self._get_set_sensors(set_id)
-            set_raised = self._get_set_raised(set_id)
-            set_discarded = self._get_set_discarded(set_id)
+            # Obtener configuración del set desde config
+            sets_config = self.config.get('sensors', {}).get('sets', {})
+            set_config = sets_config.get(float(set_id), {})
+            set_sensors = set_config.get('sensors', [])
+            set_raised = set_config.get('raised', [])
+            set_discarded = set_config.get('discarded', [])
             
             if not set_raised:
                 continue
@@ -823,14 +873,7 @@ class Tree:
                     other_raised = [r for r in set_raised if r != sensor]
                     
                     if not other_raised:
-                        results_main.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'Constante_Calibracion_K': np.nan,
-                            'Error_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results_main.append(self._create_result_record(sensor, set_id, 1))
                         continue
                     
                     ref_raised = other_raised[0]
@@ -839,14 +882,7 @@ class Tree:
                     offset_0, error_0 = self.get_offset_within_set(set_id, sensor, ref_raised)
                     
                     if offset_0 is None:
-                        results_main.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'Constante_Calibracion_K': np.nan,
-                            'Error_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results_main.append(self._create_result_record(sensor, set_id, 1))
                         continue
                     
                     # Calcular cadena para ref_raised
@@ -856,28 +892,15 @@ class Tree:
                     )
                     
                     if offset_chain is None:
-                        results_main.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'Constante_Calibracion_K': np.nan,
-                            'Error_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results_main.append(self._create_result_record(sensor, set_id, 1))
                         continue
                     
                     # Total: offset_0 + cadena
                     total_offset = offset_0 + offset_chain
                     total_error = propagate_error(error_0, error_chain)
                     
-                    results_main.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': total_offset,
-                        'Error_K': total_error,
-                        'Status': 'Calculado'
-                    })
+                    results_main.append(self._create_result_record(sensor, set_id, 1, 
+                                                                   total_offset, total_error, 'Calculado'))
                     
                     # Guardar pasos: Paso0 (sensor→otro_raised) + Pasos1-3 (de la cadena)
                     steps_row = {
@@ -899,14 +922,7 @@ class Tree:
                 
                 # Verificar si está descartado
                 if sensor in set_discarded:
-                    results_main.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': np.nan,
-                        'Error_K': np.nan,
-                        'Status': 'Sensor descartado'
-                    })
+                    results_main.append(self._create_result_record(sensor, set_id, 1, status='Sensor descartado'))
                     # No añadir pasos para descartados
                     continue
                 
@@ -919,14 +935,8 @@ class Tree:
                 if result[0] is not None:
                     offset, error, steps = result
                     
-                    results_main.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': offset,
-                        'Error_K': error,
-                        'Status': 'Calculado'
-                    })
+                    results_main.append(self._create_result_record(sensor, set_id, 1, 
+                                                                   offset, error, 'Calculado'))
                     
                     # Añadir fila con pasos
                     steps_row = {
@@ -939,24 +949,11 @@ class Tree:
                     steps_row.update(steps)
                     results_steps.append(steps_row)
                 else:
-                    results_main.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'Constante_Calibracion_K': np.nan,
-                        'Error_K': np.nan,
-                        'Status': 'Sin conexión'
-                    })
+                    results_main.append(self._create_result_record(sensor, set_id, 1))
         
         # Agregar referencia absoluta
-        results_main.append({
-            'Sensor': reference_sensor,
-            'Set': reference_set,
-            'Round': 3,
-            'Constante_Calibracion_K': 0.0,
-            'Error_K': 0.0,
-            'Status': 'Referencia'
-        })
+        results_main.append(self._create_result_record(reference_sensor, reference_set, 3, 
+                                                       0.0, 0.0, 'Referencia'))
         
         df_main = pd.DataFrame(results_main).sort_values(['Set', 'Sensor'])
         df_steps = pd.DataFrame(results_steps).sort_values(['Set', 'Sensor'])
@@ -1105,10 +1102,12 @@ class Tree:
         results = []
         
         for set_id in sorted(r1_sets):
-            # Usar helpers para obtener configuración del set
-            set_sensors = self._get_set_sensors(set_id)
-            set_raised = self._get_set_raised(set_id)
-            set_discarded = self._get_set_discarded(set_id)
+            # Obtener configuración del set desde config
+            sets_config = self.config.get('sensors', {}).get('sets', {})
+            set_config = sets_config.get(float(set_id), {})
+            set_sensors = set_config.get('sensors', [])
+            set_raised = set_config.get('raised', [])
+            set_discarded = set_config.get('discarded', [])
             
             if not set_raised:
                 continue
@@ -1116,21 +1115,8 @@ class Tree:
             for sensor in set_sensors:
                 # Verificar si está descartado
                 if sensor in set_discarded:
-                    results.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'N_Caminos': 0,
-                        'Constante_Primer_Camino_K': np.nan,
-                        'Error_Primer_Camino_K': np.nan,
-                        'Constante_Min_Error_K': np.nan,
-                        'Error_Min_K': np.nan,
-                        'Constante_Media_Ponderada_K': np.nan,
-                        'Error_Media_Ponderada_K': np.nan,
-                        'Std_Entre_Caminos_K': np.nan,
-                        'Max_Diff_Caminos_K': np.nan,
-                        'Status': 'Sensor descartado'
-                    })
+                    results.append(self._create_multipath_result_record(sensor, set_id, 
+                                                                        status='Sensor descartado'))
                     continue
                 
                 # Si es raised, calibrar respecto al otro raised
@@ -1138,21 +1124,7 @@ class Tree:
                     other_raised = [r for r in set_raised if r != sensor]
                     
                     if not other_raised:
-                        results.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'N_Caminos': 0,
-                            'Constante_Primer_Camino_K': np.nan,
-                            'Error_Primer_Camino_K': np.nan,
-                            'Constante_Min_Error_K': np.nan,
-                            'Error_Min_K': np.nan,
-                            'Constante_Media_Ponderada_K': np.nan,
-                            'Error_Media_Ponderada_K': np.nan,
-                            'Std_Entre_Caminos_K': np.nan,
-                            'Max_Diff_Caminos_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results.append(self._create_multipath_result_record(sensor, set_id))
                         continue
                     
                     ref_raised = other_raised[0]
@@ -1161,21 +1133,7 @@ class Tree:
                     offset_0, error_0 = self.get_offset_within_set(set_id, sensor, ref_raised)
                     
                     if offset_0 is None:
-                        results.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'N_Caminos': 0,
-                            'Constante_Primer_Camino_K': np.nan,
-                            'Error_Primer_Camino_K': np.nan,
-                            'Constante_Min_Error_K': np.nan,
-                            'Error_Min_K': np.nan,
-                            'Constante_Media_Ponderada_K': np.nan,
-                            'Error_Media_Ponderada_K': np.nan,
-                            'Std_Entre_Caminos_K': np.nan,
-                            'Max_Diff_Caminos_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results.append(self._create_multipath_result_record(sensor, set_id))
                         continue
                     
                     # Explorar caminos para ref_raised
@@ -1184,21 +1142,7 @@ class Tree:
                     )
                     
                     if not paths_ref:
-                        results.append({
-                            'Sensor': sensor,
-                            'Set': set_id,
-                            'Round': 1,
-                            'N_Caminos': 0,
-                            'Constante_Primer_Camino_K': np.nan,
-                            'Error_Primer_Camino_K': np.nan,
-                            'Constante_Min_Error_K': np.nan,
-                            'Error_Min_K': np.nan,
-                            'Constante_Media_Ponderada_K': np.nan,
-                            'Error_Media_Ponderada_K': np.nan,
-                            'Std_Entre_Caminos_K': np.nan,
-                            'Max_Diff_Caminos_K': np.nan,
-                            'Status': 'Sin conexión'
-                        })
+                        results.append(self._create_multipath_result_record(sensor, set_id))
                         continue
                     
                     # Aplicar offset_0 a todos los caminos
@@ -1225,21 +1169,14 @@ class Tree:
                     weighted_offset = np.sum(offsets * weights)
                     weighted_error = np.sqrt(np.sum((errors * weights)**2))
                     
-                    results.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'Round': 1,
-                        'N_Caminos': len(all_paths),
-                        'Constante_Primer_Camino_K': first_offset,
-                        'Error_Primer_Camino_K': first_error,
-                        'Constante_Min_Error_K': min_offset,
-                        'Error_Min_K': min_error,
-                        'Constante_Media_Ponderada_K': weighted_offset,
-                        'Error_Media_Ponderada_K': weighted_error,
-                        'Std_Entre_Caminos_K': offsets.std(),
-                        'Max_Diff_Caminos_K': offsets.max() - offsets.min(),
-                        'Status': 'Calculado'
-                    })
+                    results.append(self._create_multipath_result_record(
+                        sensor, set_id, len(all_paths),
+                        first_offset, first_error,
+                        min_offset, min_error,
+                        weighted_offset, weighted_error,
+                        offsets.std(), offsets.max() - offsets.min(),
+                        'Calculado'
+                    ))
                     continue
                 
                 # Explorar TODOS los caminos posibles
@@ -1249,20 +1186,8 @@ class Tree:
                 
                 if not all_paths:
                     # No hay caminos válidos
-                    results.append({
-                        'Sensor': sensor,
-                        'Set': set_id,
-                        'N_Caminos': 0,
-                        'Constante_Primer_Camino_K': np.nan,
-                        'Error_Primer_Camino_K': np.nan,
-                        'Constante_Min_Error_K': np.nan,
-                        'Error_Min_K': np.nan,
-                        'Constante_Media_Ponderada_K': np.nan,
-                        'Error_Media_Ponderada_K': np.nan,
-                        'Std_Entre_Caminos_K': np.nan,
-                        'Max_Diff_Caminos_K': np.nan,
-                        'Status': 'Sin caminos válidos'
-                    })
+                    results.append(self._create_multipath_result_record(sensor, set_id, 
+                                                                        status='Sin caminos válidos'))
                     continue
                 
                 # Extraer offsets y errores
@@ -1291,20 +1216,14 @@ class Tree:
                 std_between_paths = np.std(offsets)
                 max_diff = np.max(offsets) - np.min(offsets)
                 
-                results.append({
-                    'Sensor': sensor,
-                    'Set': set_id,
-                    'N_Caminos': len(all_paths),
-                    'Constante_Primer_Camino_K': primer_offset,
-                    'Error_Primer_Camino_K': primer_error,
-                    'Constante_Min_Error_K': min_error_offset,
-                    'Error_Min_K': min_error,
-                    'Constante_Media_Ponderada_K': weighted_offset,
-                    'Error_Media_Ponderada_K': weighted_error,
-                    'Std_Entre_Caminos_K': std_between_paths,
-                    'Max_Diff_Caminos_K': max_diff,
-                    'Status': 'Calculado'
-                })
+                results.append(self._create_multipath_result_record(
+                    sensor, set_id, len(all_paths),
+                    primer_offset, primer_error,
+                    min_error_offset, min_error,
+                    weighted_offset, weighted_error,
+                    std_between_paths, max_diff,
+                    'Calculado'
+                ))
         
         df = pd.DataFrame(results).sort_values(['Set', 'Sensor'])
         
