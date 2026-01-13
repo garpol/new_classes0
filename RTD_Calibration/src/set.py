@@ -127,15 +127,22 @@ class Set:
     
     def calculate_calibration_constants(self, selected_sets=None):
         """
-        Calcula constantes de calibración para cada set.
+        Calcula matrices NxN de offsets entre sensores dentro del mismo set.
         
-        Las constantes son el promedio ponderado de los offsets de todos los runs.
-        Los errores son la desviación estándar de los offsets entre runs.
+        NOTA IMPORTANTE:
+        Estas constantes son PROVISIONALES y se usan como input para la clase Tree.
+        Tree es quien calcula las constantes de calibración FINALES de forma escalonada:
+          - Encadena offsets a través de sensores 'raised' entre sets de diferentes rondas
+          - Pondera múltiples caminos para cada sensor
+          - Genera constantes globales respecto a una referencia absoluta (Set R3)
+        
+        Las matrices NxN aquí calculadas permiten a Tree acceder a cualquier par
+        (sensor_i, sensor_j) necesario para el encadenamiento.
         
         Args:
             selected_sets: Lista de sets a procesar (None = todos)
         """
-        print("\n=== Calculando constantes de calibración ===")
+        print("\n=== Calculando matrices de offsets (provisionales) ===")
         
         sets_to_process = selected_sets if selected_sets else list(self.runs_by_set.keys()) # Todos los sets con runs
         
@@ -195,9 +202,37 @@ class Set:
             # Error = desviación estándar de los offsets
             errors = np.std(offsets_array, axis=0, ddof=1) # shape: (n_sensors, n_sensors)
             
+            # Forzar diagonal a 0 (un sensor consigo mismo tiene offset=0 y error=0)
+            np.fill_diagonal(constants, 0.0)
+            np.fill_diagonal(errors, 0.0)
+            
             # Convertir a DataFrames con nombres de sensores
             constants_df = pd.DataFrame(constants, index=sensor_names, columns=sensor_names)
             errors_df = pd.DataFrame(errors, index=sensor_names, columns=sensor_names)
+            
+            # Excluir sensores descartados y referencias del cálculo
+            set_config = self.config.get('sensors', {}).get('sets', {}).get(set_num, {})
+            discarded_sensors = set_config.get('discarded', [])
+            reference_sensors = set_config.get('reference', [])
+            excluded_sensors = discarded_sensors + reference_sensors
+            
+            if excluded_sensors and sensor_names:
+                # Convertir a strings para comparar con nombres de sensores
+                excluded_sensors_str = [str(s) for s in excluded_sensors]
+                
+                # Filtrar sensores que existen en la matriz
+                sensors_to_exclude = [s for s in excluded_sensors_str if s in sensor_names]
+                
+                if sensors_to_exclude:
+                    # Marcar filas y columnas de sensores excluidos como NaN
+                    constants_df.loc[sensors_to_exclude, :] = np.nan
+                    constants_df.loc[:, sensors_to_exclude] = np.nan
+                    errors_df.loc[sensors_to_exclude, :] = np.nan
+                    errors_df.loc[:, sensors_to_exclude] = np.nan
+                    
+                    print(f"  Sensores excluidos: {sensors_to_exclude}")
+                    print(f"    - Referencias: {[s for s in sensors_to_exclude if int(s) in reference_sensors]}")
+                    print(f"    - Descartados: {[s for s in sensors_to_exclude if int(s) in discarded_sensors]}")
             
             self.calibration_constants[set_num] = constants_df
             self.calibration_errors[set_num] = errors_df
@@ -208,12 +243,13 @@ class Set:
         
         print(f"\nTotal sets con constantes: {len(self.calibration_constants)}")
     
-    def save_results(self, output_file="set_calibration_results.xlsx"):
+    def save_results(self, output_file="set_calibration_results.xlsx", save_csv=True):
         """
-        Guarda los resultados en un archivo Excel.
+        Guarda los resultados en archivos Excel y CSV.
         
         Args:
-            output_file: Nombre del archivo de salida (se guardará en docs/)
+            output_file: Nombre del archivo Excel de salida (se guardará en docs/)
+            save_csv: Si True, también guarda cada matriz en CSV individual
         """
         if not self.calibration_constants:
             print("No hay constantes calculadas para guardar")
@@ -225,8 +261,9 @@ class Set:
         docs_dir.mkdir(exist_ok=True)  # Crear si no existe
         output_path = docs_dir / output_file
         
-        print(f"\nGuardando resultados en {output_path}")
+        print(f"\nGuardando resultados...")
         
+        # Guardar Excel
         with pd.ExcelWriter(output_path) as writer:
             for set_num in sorted(self.calibration_constants.keys()):
                 # Guardar constantes
@@ -237,23 +274,46 @@ class Set:
                 sheet_name = f"Set_{int(set_num)}_Errors"
                 self.calibration_errors[set_num].to_excel(writer, sheet_name=sheet_name)
         
-        print(f"✓ Resultados guardados en {output_path}")
+        print(f"✓ Excel guardado en {output_path}")
+        
+        # Guardar CSVs individuales
+        if save_csv:
+            for set_num in sorted(self.calibration_constants.keys()):
+                # CSV de constantes
+                csv_constants = docs_dir / f"set_{int(set_num)}_constants.csv"
+                self.calibration_constants[set_num].to_csv(csv_constants)
+                
+                # CSV de errores
+                csv_errors = docs_dir / f"set_{int(set_num)}_errors.csv"
+                self.calibration_errors[set_num].to_csv(csv_errors)
+            
+            print(f"✓ CSVs guardados en {docs_dir}/ (set_N_constants.csv, set_N_errors.csv)")
     
     def get_summary(self):
         """
         Genera un resumen de los resultados.
         
         Returns:
-            DataFrame con estadísticas por set
+            DataFrame con estadísticas por set, incluyendo info de sensores excluidos
         """
         summary = []
         for set_num in sorted(self.calibration_constants.keys()):
             constants = self.calibration_constants[set_num]
             errors = self.calibration_errors[set_num]
             
+            # Obtener información de exclusión del config
+            set_config = self.config.get('sensors', {}).get('sets', {}).get(set_num, {})
+            n_references = len(set_config.get('reference', []))
+            n_discarded = len(set_config.get('discarded', []))
+            n_excluded = n_references + n_discarded
+            n_valid = constants.shape[0] - n_excluded
+            
             summary.append({
                 "CalibSetNumber": set_num,
-                "N_Sensors": constants.shape[0],
+                "N_Sensors_Total": constants.shape[0],
+                "N_Sensors_Valid": n_valid,
+                "N_References": n_references,
+                "N_Discarded": n_discarded,
                 "N_Runs": len(self.runs_by_set[set_num]),
                 "Mean_Offset_K": np.nanmean(np.abs(constants.values)),
                 "Mean_Error_K": np.nanmean(errors.values),

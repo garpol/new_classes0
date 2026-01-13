@@ -8,6 +8,20 @@ La calibración sigue una estructura jerárquica:
 
 Los sensores "raised" (elevados) actúan como puentes entre rondas,
 permitiendo calcular offsets encadenados.
+
+TODO LIST:
+-----------
+1. [PENDIENTE] Deduplicar sensores en CSV final de calculate_all_offsets()
+   - Actualmente: Si un sensor aparece en múltiples sets (ej: descartado en Set 3, 
+     recuperado en Set 5), se generan múltiples filas en el DataFrame final
+   - Solución propuesta: Implementar lógica de priorización:
+     a) Priorizar Status: 'Calculado' > 'Referencia' > 'Descartado' > 'Sin conexión'
+     b) Si hay múltiples 'Calculado', tomar el del set más alto (recuperado)
+     c) Si empatan en set, tomar el de menor error
+   - Implementación: Añadir deduplicación al final de calculate_all_offsets()
+     antes de retornar el DataFrame
+   - Ventaja: Cada sensor tendrá UNA constante única (comportamiento esperado físicamente)
+   - Opción: Guardar CSV "_debug.csv" con duplicados para trazabilidad si es necesario
 """
 
 import pandas as pd
