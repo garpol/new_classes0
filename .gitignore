@@ -28,7 +28,7 @@ RTD_Calibration/archive/
 *.backup
 *.before_compact
 
-# Tests (de momento)
+# Tests 
 RTD_Calibration/tests/
 
 # IDE

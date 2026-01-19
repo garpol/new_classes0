@@ -5,190 +5,280 @@ Script principal para procesamiento de calibración RTD.
 Calcula constantes de calibración usando el método de MEDIA PONDERADA (1/error²)
 que considera todos los caminos válidos disponibles para cada sensor.
 
-IMPORTANTE: Usar rango 3-39 para procesar todos los sets de Ronda 1 (R1)
-que tienen conexión completa con la referencia del Set 57 (Ronda 3).
+NUEVA ARQUITECTURA:
+- TreeEntry: Nodos con información de cada CalibSet y relaciones
+- Tree: Contenedor jerárquico R3 → R2 → R1
+- utils/tree_utils.py: Construcción del Tree
+- utils/calibration_utils.py: Cálculo de constantes finales
+
+IMPORTANTE: Procesa TODOS los sets necesarios para construir el Tree completo.
+La referencia absoluta es el Set 57 (Ronda 3).
 
 Uso:
-    python main.py [--range inicio fin] [--sets S1 S2 S3...]
+    python main.py [--output PATH]
     
 Ejemplos:
-    python main.py                       # Por defecto: procesa sets 3-39
-    python main.py --range 3 39          # Procesar sets del 3 al 39 (RECOMENDADO)
-    python main.py --range 3 10          # Solo sets 3-10 (para pruebas)
-    python main.py --sets 3 4 5 49 57    # Procesar sets específicos
+    python main.py                                    # Usa rutas por defecto
+    python main.py --output custom_results.csv        # CSV personalizado
     
 Salida:
-    - Estadísticas en terminal (errores, constantes, resumen por set)
-    - calibration_analisis_multicamino.csv (análisis completo con 3 estrategias)
-    - calibration_constants_media_ponderada.csv (CSV simplificado para uso final)
+    - calibration_constants_tree.csv (constantes finales con multi-camino)
+    - calibration_stats_by_set.csv (estadísticas por set)
 """
 
 import sys
 import argparse
 from pathlib import Path
+import time
 
 # Añadir src al path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
+src_path = Path(__file__).parent / 'src'
+sys.path.insert(0, str(src_path))
 
-from set import Set  # type: ignore
-from tree import Tree  # type: ignore
-import yaml
+# Añadir utils al path para evitar conflicto con utils.py
+utils_path = src_path / 'utils'
+sys.path.insert(0, str(utils_path))
+
+from calibset import CalibSet  # type: ignore
+from logfile import Logfile  # type: ignore
+from config import load_config  # type: ignore
+from tree_utils import create_tree_from_calibsets  # type: ignore
+from calibration_utils import calibrate_tree, export_calibration_details  # type: ignore
+
+# Import utils functions
+sys.path.remove(str(utils_path))  # Remover para importar utils.py
+from utils import create_calibration_set  # type: ignore
+sys.path.insert(0, str(utils_path))  # Volver a añadir
 
 
 def main():
     """
     Punto de entrada principal para el procesamiento de calibración.
+    
+    Usa la nueva arquitectura modular:
+    1. Carga configuración
+    2. Crea CalibSets para todos los sets
+    3. Construye Tree jerárquico
+    4. Calcula constantes finales con multi-camino
     """
     
     # Parser de argumentos
     parser = argparse.ArgumentParser(
-        description='Procesamiento de calibración RTD con media ponderada'
+        description='Procesamiento de calibración RTD con arquitectura modular Tree'
     )
-    parser.add_argument('--range', nargs=2, type=int, metavar=('INICIO', 'FIN'),
-                       help='Rango de sets R1 a procesar (ej: --range 3 39)')
-    parser.add_argument('--sets', nargs='+', type=int,
-                       help='Sets específicos a procesar (ej: --sets 3 4 5 49 57)')
+    parser.add_argument('--output', type=str, 
+                       help='Ruta para el CSV de salida (default: data/results/calibration_constants_tree.csv)')
     
     args = parser.parse_args()
     
     print("="*80)
-    print("RTD CALIBRATION - Constantes con Media Ponderada (1/error²)")
+    print("RTD CALIBRATION - Nueva Arquitectura Tree")
+    print("="*80)
+    print("\nArquitectura:")
+    print("  - TreeEntry: Nodos con CalibSets y relaciones")
+    print("  - Tree: Contenedor jerárquico R3 → R2 → R1")
+    print("  - Multi-camino: Media ponderada con 1/σ²")
+    
+    # Rutas
+    project_root = Path(__file__).parent
+    config_path = project_root / 'config' / 'config.yml'
+    
+    if args.output:
+        output_path = project_root / args.output
+    else:
+        output_path = project_root / 'data' / 'results' / 'calibration_constants_tree.csv'
+    
+    print(f"\nConfiguracion: {config_path}")
+    print(f"Salida: {output_path}")
+    
+    # 1. Cargar configuración
+    print("\n" + "="*80)
+    print("PASO 1: Carga de Configuración")
     print("="*80)
     
-    # Determinar sets a procesar
-    if args.range:
-        r1_start, r1_end = args.range
-        print(f"\nModo: Rango de sets R1 ({r1_start}-{r1_end})")
-    elif args.sets:
-        sets_to_process = args.sets
-        print(f"\nModo: Sets específicos {sets_to_process}")
-    else:
-        # Por defecto: procesar sets 3-39 (R1 completo)
-        r1_start, r1_end = 3, 39
-        print(f"\nModo: Rango por defecto R1 ({r1_start}-{r1_end})")
+    config = load_config(str(config_path))
+    all_set_ids = sorted(config['sensors']['sets'].keys())
     
-    # Cargar config para obtener todos los sets necesarios
-    config_path = Path(__file__).parent / 'config' / 'config.yml'
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
+    print(f"✓ Configuración cargada")
+    print(f"  Total sets: {len(all_set_ids)}")
     
-    all_set_ids = list(config['sensors']['sets'].keys())
+    # Contar por rondas
+    rounds_count = {}
+    for set_info in config['sensors']['sets'].values():
+        try:
+            r = int(set_info['round'])  # Asegurar que sea int
+            rounds_count[r] = rounds_count.get(r, 0) + 1
+        except (ValueError, KeyError):
+            # Ignorar sets sin round válido (ej: 'Refs')
+            continue
     
-    print(f"\nCargando datos de {len(all_set_ids)} sets configurados...")
-    set_handler = Set()
+    print(f"  Distribución por rondas:")
+    for r in sorted(rounds_count.keys()):
+        print(f"    R{r}: {rounds_count[r]} sets")
     
-    # Procesar todos los sets (necesarios para el árbol)
-    set_handler.group_runs(all_set_ids)
-    set_handler.calculate_calibration_constants(all_set_ids)
+    # 2. Crear CalibSets
+    print("\n" + "="*80)
+    print("PASO 2: Creación de CalibSets")
+    print("="*80)
     
-    # Crear diccionario de sets procesados
-    sets_dict = {}
-    for set_id in all_set_ids:
-        class SetData:
-            def __init__(self, constants, errors):
-                self.calibration_constants = constants
-                self.calibration_errors = errors
-        
-        if set_id in set_handler.calibration_constants:
-            sets_dict[float(set_id)] = SetData(
-                set_handler.calibration_constants[set_id],
-                set_handler.calibration_errors[set_id]
+    # Cargar logfile una sola vez
+    # El config tiene rutas relativas que incluyen RTD_Calibration, necesitamos ajustar
+    logfile_relative = config['paths']['logfile']
+    if logfile_relative.startswith('RTD_Calibration/'):
+        logfile_relative = logfile_relative.replace('RTD_Calibration/', '', 1)
+    logfile_path = project_root / logfile_relative
+    
+    logfile_obj = Logfile(filepath=str(logfile_path))
+    logfile = logfile_obj.log_file
+    print(f"✓ Logfile cargado: {len(logfile)} entradas")
+    
+    calibsets = {}
+    failed_sets = []
+    start_time = time.time()
+    
+    print(f"\nProcesando {len(all_set_ids)} sets...")
+    
+    for i, set_id in enumerate(all_set_ids, 1):
+        try:
+            # Usar create_calibration_set de utils
+            calibset = create_calibration_set(
+                set_number=set_id,
+                logfile=logfile,
+                config=config
             )
+            calibsets[set_id] = calibset
+            
+            # Log cada 10 sets
+            if i % 10 == 0:
+                elapsed = time.time() - start_time
+                print(f"  Procesados: {i}/{len(all_set_ids)} sets ({elapsed:.1f}s)")
+        
+        except Exception as e:
+            failed_sets.append((set_id, str(e)))
+            print(f"  ✗ Set {set_id}: {e}")
     
-    print(f"Sets procesados: {len(sets_dict)}")
+    elapsed = time.time() - start_time
     
-    # Construcción del árbol
-    print("\nConstruyendo árbol de calibración...")
-    tree = Tree(sets_dict, str(config_path))
+    print(f"\n✓ CalibSets creados: {len(calibsets)}")
+    print(f"✗ Fallos: {len(failed_sets)}")
+    print(f"⏱  Tiempo: {elapsed:.1f}s")
     
-    # Calcular constantes con MEDIA PONDERADA
-    print("\nCalculando constantes con MEDIA PONDERADA de todos los caminos...")
-    print("(Esto explora todas las combinaciones posibles de caminos)\n")
+    if not calibsets:
+        print("\n⚠️  ERROR: No se pudo crear ningún CalibSet")
+        return
     
-    if args.range or (not args.sets):
-        df_results = tree.calculate_all_offsets_multi_path(r1_sets_range=(r1_start, r1_end))
-    else:
-        # Para sets específicos, aún usar calculate_all_offsets_multi_path con rango amplio
-        df_results = tree.calculate_all_offsets_multi_path(r1_sets_range=(min(sets_to_process), max(sets_to_process)))
+    # 3. Construir Tree
+    print("\n" + "="*80)
+    print("PASO 3: Construcción del Tree")
+    print("="*80)
     
-    # Filtrar solo sensores calculados
+    tree = create_tree_from_calibsets(
+        calibsets=calibsets,
+        config=config,
+        root_set_id=57.0  # Set 57 es R3 (root/referencia)
+    )
+    
+    print(f"\n✓ Tree construido:")
+    print(f"  Total entries: {len(tree.entries)}")
+    print(f"  Root: Set {tree.root.set_number if tree.root else 'N/A'}")
+    
+    # Estadísticas por ronda
+    print(f"\n  Entries por ronda:")
+    for r in [1, 2, 3]:
+        entries = tree.get_entries_by_round(r)
+        print(f"    R{r}: {len(entries)} entries")
+    
+    # Mostrar estructura
+    print(f"\n  Estructura jerárquica:")
+    print(tree)
+    
+    # 4. Calcular constantes finales
+    print("\n" + "="*80)
+    print("PASO 4: Cálculo de Constantes de Calibración")
+    print("="*80)
+    print("\nUsando MEDIA PONDERADA de múltiples caminos (1/σ²)")
+    print("Buscando todos los caminos posibles R1 → R2 → R3...\n")
+    
+    df_results = calibrate_tree(
+        tree=tree,
+        reference_sensor_id=None,  # Usa reference del root
+        output_csv=str(output_path)
+    )
+    
+    # 4b. Exportar detalles de calibración (pasos intermedios)
+    print("\n" + "="*80)
+    print("PASO 4b: Exportar Detalles de Calibración")
+    print("="*80)
+    print("\nGenerando CSV con todos los pasos intermedios...")
+    
+    details_path = project_root / 'data' / 'results' / 'calibration_details_tree.csv'
+    export_calibration_details(
+        tree=tree,
+        output_csv=str(details_path),
+        reference_sensor_id=None
+    )
+    print(f"✓ Detalles exportados: {details_path}")
+    
+    # 5. Análisis de resultados
+    print("\n" + "="*80)
+    print("PASO 5: Análisis de Resultados")
+    print("="*80)
+    
+    # Filtrar solo calculados
     calculated = df_results[df_results['Status'] == 'Calculado'].copy()
     
-    # Mostrar estadísticas globales
-    print("="*80)
-    print("RESULTADOS GLOBALES")
-    print("="*80)
+    if len(calculated) == 0:
+        print("\n⚠️  No se calcularon constantes para ningún sensor")
+        return
+    
     print(f"\nTotal sensores procesados: {len(df_results)}")
     print(f"  Calculados: {len(calculated)}")
-    print(f"  Descartados: {(df_results['Status'] == 'Sensor descartado').sum()}")
+    print(f"  Descartados: {(df_results['Status'] == 'Descartado').sum()}")
     print(f"  Sin conexión: {(df_results['Status'] == 'Sin conexión').sum()}")
     print(f"  Referencia: {(df_results['Status'] == 'Referencia').sum()}")
     
-    print("\n--- Estadísticas de MEDIA PONDERADA ---")
-    print(f"Error medio: {calculated['Error_Media_Ponderada_K'].mean() * 1000:.3f} mK")
-    print(f"Error std: {calculated['Error_Media_Ponderada_K'].std() * 1000:.3f} mK")
-    print(f"Constante media: {calculated['Constante_Media_Ponderada_K'].mean():.6f} K")
-    print(f"Constante std: {calculated['Constante_Media_Ponderada_K'].std():.6f} K")
+    print("\n--- Estadísticas Globales ---")
+    print(f"Constante media: {calculated['Constante_Calibracion_K'].mean():.6f} K")
+    print(f"Constante std: {calculated['Constante_Calibracion_K'].std():.6f} K")
+    print(f"Error medio: {calculated['Error_K'].mean() * 1000:.3f} mK")
+    print(f"Error std: {calculated['Error_K'].std() * 1000:.3f} mK")
+    print(f"Caminos promedio: {calculated['N_Paths'].mean():.1f}")
+    print(f"SNR medio: {(calculated['Constante_Calibracion_K'].abs() / calculated['Error_K']).mean():.1f}")
     
-    # Mostrar comparación con primer camino
-    mejora = (calculated['Error_Primer_Camino_K'].mean() - calculated['Error_Media_Ponderada_K'].mean()) * 1000
-    print(f"\nMejora vs primer camino: {mejora:.3f} mK")
-    
-    # Resumen por set
-    print("\n" + "="*80)
-    print("RESUMEN POR SET (Media Ponderada)")
-    print("="*80)
-    
-    for set_id in sorted(calculated['Set'].unique()):
-        set_data = calculated[calculated['Set'] == set_id]
-        
-        print(f"\nSet {int(set_id)}:")
-        print(f"  Sensores calculados: {len(set_data)}")
-        print(f"  Constante media: {set_data['Constante_Media_Ponderada_K'].mean():.6f} ± {set_data['Constante_Media_Ponderada_K'].std():.6f} K")
-        print(f"  Error medio: {set_data['Error_Media_Ponderada_K'].mean() * 1000:.3f} mK")
-        print(f"  Caminos promedio por sensor: {set_data['N_Caminos'].mean():.1f}")
-    
-    # Mostrar tabla de constantes (primeros 20 sensores)
-    print("\n" + "="*80)
-    print("CONSTANTES INDIVIDUALES (Primeros 20 sensores)")
-    print("="*80)
-    print(f"\n{'Sensor':<8} {'Set':<5} {'Constante (K)':<15} {'Error (mK)':<12} {'N_Caminos':<10}")
-    print("-"*80)
+    # Tabla de constantes individuales
+    print("\n--- Constantes Individuales (Primeros 20) ---")
+    print(f"\n{'Sensor':<8} {'Set':<5} {'Constante (K)':<15} {'Error (mK)':<12} {'N_Paths':<10}")
+    print("-"*70)
     
     for _, row in calculated.head(20).iterrows():
         sensor = int(row['Sensor'])
         set_id = int(row['Set'])
-        const = row['Constante_Media_Ponderada_K']
-        error = row['Error_Media_Ponderada_K'] * 1000
-        n_paths = int(row['N_Caminos'])
+        const = row['Constante_Calibracion_K']
+        error = row['Error_K'] * 1000
+        n_paths = int(row['N_Paths'])
         print(f"{sensor:<8} {set_id:<5} {const:<15.6f} {error:<12.3f} {n_paths:<10}")
     
     if len(calculated) > 20:
-        print(f"\n... y {len(calculated) - 20} sensores más (ver archivos CSV)")
-    
-    # Guardar resultados a CSV
-    output_dir = Path(__file__).parent / 'data' / 'results'
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # CSV completo con análisis multi-camino
-    output_multi = output_dir / 'calibration_analisis_multicamino.csv'
-    df_results.to_csv(output_multi, index=False)
-    print(f"\n✓ CSV completo guardado: {output_multi}")
-    
-    # CSV simplificado con solo media ponderada (para usuarios)
-    df_simple = calculated[['Sensor', 'Set', 'Constante_Media_Ponderada_K', 
-                            'Error_Media_Ponderada_K', 'N_Caminos']].copy()
-    df_simple.columns = ['Sensor', 'Set', 'Constante_Calibracion_K', 'Error_K', 'N_Caminos']
-    output_simple = output_dir / 'calibration_constants_media_ponderada.csv'
-    df_simple.to_csv(output_simple, index=False)
-    print(f"✓ CSV simplificado guardado: {output_simple}")
+        print(f"\n... y {len(calculated) - 20} sensores más (ver CSV)")
     
     print("\n" + "="*80)
     print("PROCESO COMPLETADO")
     print("="*80)
-    print("\nLos resultados incluyen:")
-    print("  1. Análisis completo (3 estrategias): calibration_analisis_multicamino.csv")
-    print("  2. Constantes finales (media ponderada): calibration_constants_media_ponderada.csv")
+    print("\nArchivos generados:")
+    print(f"  Constantes finales: {output_path}")
+    print(f"  Detalles de calibración: {details_path}")
+    print("\nColumnas del CSV de constantes:")
+    print("  - Sensor: ID del sensor")
+    print("  - Set: Número de set de calibración")
+    print("  - Round: Ronda (1, 2 o 3)")
+    print("  - Constante_Calibracion_K: Offset final (K)")
+    print("  - Error_K: Error propagado (K)")
+    print("  - N_Paths: Número de caminos usados")
+    print("  - Status: Estado (Calculado/Descartado/Sin conexión)")
+    print("\nColumnas del CSV de detalles:")
+    print("  - Path_Number=0: Media ponderada final")
+    print("  - Path_Number>0: Caminos individuales")
+    print("  - Paso1/2/3: Detalles de cada paso del camino")
     print("="*80)
 
 
