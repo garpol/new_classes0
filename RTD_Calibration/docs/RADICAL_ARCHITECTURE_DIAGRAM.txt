@@ -1,0 +1,310 @@
+"""
+ARQUITECTURA RADICAL SIMPLIFICADA - Diagrama Visual
+====================================================
+
+FILOSOFÍA: "Clases vacías + Relleno de datos + Aplicar maquinaria"
+
+
+ESTRUCTURA DE ARCHIVOS:
+========================
+
+RTD_Calibration/
+├── src/
+│   ├── sensor.py          # DATA CLASS (20 líneas)
+│   ├── run.py             # DATA CLASS (20 líneas)
+│   ├── calibration_set.py # DATA CLASS (30 líneas)
+│   ├── tree.py            # ESTRUCTURA + RELACIONES (80 líneas)
+│   └── utils.py           # TODA LA MAQUINARIA (500+ líneas)
+├── main.py                # ORQUESTACIÓN (flujo principal)
+└── config/
+    └── config.yml         # Configuración
+
+
+DIAGRAMA DE CLASES:
+===================
+
+┌─────────────────────────────────────────────────────────┐
+│                    main.py                              │
+│              (ORQUESTACIÓN DEL FLUJO)                   │
+│                                                         │
+│  1. Tree(config) → estructura vacía                     │
+│  2. Cargar runs desde logfile                          │
+│  3. utils.calculate_run_offsets() → llenar Run.offsets │
+│  4. utils.calculate_calibset_mean_offsets()            │
+│  5. utils.calculate_tree_calibration_constants()       │
+│  6. utils.export_results()                             │
+└─────────────┬───────────────────────────────────────────┘
+              │ usa
+              ▼
+┌──────────────────────────────────────────────────────────┐
+│                    utils.py                              │
+│               (TODA LA MAQUINARIA)                       │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  CARGA DE DATOS:                                         │
+│  • load_run_data()                                       │
+│  • get_run_metadata_from_logfile()                       │
+│                                                          │
+│  CÁLCULOS DE RUN:                                        │
+│  • calculate_run_offsets()                               │
+│                                                          │
+│  CÁLCULOS DE CALIBSET:                                   │
+│  • calculate_calibset_mean_offsets()                     │
+│                                                          │
+│  CONSTRUCCIÓN DE ESTRUCTURA:                             │
+│  • initialize_calibset_from_config()                     │
+│  • derive_parent_child_relations()                       │
+│                                                          │
+│  CÁLCULOS GLOBALES (TREE):                               │
+│  • find_paths_between_sensors()                          │
+│  • calculate_offset_along_path()                         │
+│  • weighted_average_of_paths()                           │
+│  • calculate_tree_calibration_constants() ← PRINCIPAL   │
+│                                                          │
+│  EXPORTACIÓN:                                            │
+│  • export_calibration_results()                          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+              │ opera sobre
+              ▼
+┌─────────────────────────────────────────────────────────┐
+│                      Tree                               │
+│              (ESTRUCTURA + RELACIONES)                  │
+├─────────────────────────────────────────────────────────┤
+│ DATA:                                                   │
+│  - sets: Dict[int, CalibrationSet]                      │
+│  - parent_child_relations: Dict[int, List[int]]         │
+│  - sets_by_round: Dict[int, List[int]]                  │
+│                                                         │
+│ MÉTODOS:                                                │
+│  - _build_empty_structure()    # Crea sets vacíos      │
+│  - _derive_relations()         # Deriva parent-child   │
+│  - print_structure()           # Imprime árbol         │
+│  - get_calibset()              # Accessor              │
+│  - add_run_to_set()            # Añade run a set       │
+└─────────────┬───────────────────────────────────────────┘
+              │ contiene
+              ▼
+┌─────────────────────────────────────────────────────────┐
+│                  CalibrationSet                         │
+│                   (DATA CLASS)                          │
+├─────────────────────────────────────────────────────────┤
+│ DATA:                                                   │
+│  - set_number: int                                      │
+│  - round: int                                           │
+│  - parent_set: Optional[int]                            │
+│  - sensors: List[Sensor]                                │
+│  - reference_sensors: List[Sensor]                      │
+│  - runs: List[Run]                                      │
+│  - mean_offsets: Dict[int, float]  # Media de runs     │
+│  - offset_errors: Dict[int, float]  # Desv. estándar   │
+│                                                         │
+│ MÉTODOS:                                                │
+│  - __repr__()  # Solo representación                   │
+│                                                         │
+│ NO TIENE:                                               │
+│  - calibration_constants  ← Se calculan en Tree        │
+└─────────────┬───────────────────────────────────────────┘
+              │ contiene
+              ├──────────────────┬──────────────────┐
+              ▼                  ▼                  ▼
+┌───────────────────┐  ┌───────────────────┐  ┌───────────────────┐
+│      Sensor       │  │      Sensor       │  │       Run         │
+│   (DATA CLASS)    │  │   (DATA CLASS)    │  │   (DATA CLASS)    │
+├───────────────────┤  ├───────────────────┤  ├───────────────────┤
+│ - id: int         │  │ - id: int         │  │ - filename: str   │
+│ - calibration_    │  │ - calibration_    │  │ - temperature_    │
+│   constant: float │  │   constant: float │  │   data: DataFrame │
+│                   │  │                   │  │ - sensor_ids: []  │
+│ MÉTODOS:          │  │ MÉTODOS:          │  │ - is_valid: bool  │
+│ - __repr__()      │  │ - __repr__()      │  │ - offsets: dict   │
+│ - __eq__()        │  │ - __eq__()        │  │                   │
+│ - __hash__()      │  │ - __hash__()      │  │ MÉTODOS:          │
+│                   │  │                   │  │ - __repr__()      │
+└───────────────────┘  └───────────────────┘  └───────────────────┘
+    (12 por set)         (2 refs por set)        (múltiples por set)
+
+
+FLUJO DE DATOS:
+===============
+
+PASO 1: ESTRUCTURA VACÍA
+-------------------------
+config.yml ──→ Tree.__init__() 
+           └──→ Tree._build_empty_structure()
+               └──→ utils.initialize_calibset_from_config()
+                   └──→ CalibrationSet (vacío)
+                       └──→ [Sensor × 12] (vacíos, sin constantes)
+
+
+PASO 2: CARGAR RUNS
+--------------------
+logfile.csv ──→ main.py itera filas
+            └──→ Run(filename)  # Crea objeto vacío
+                └──→ utils.load_run_data(run) # Llena temperature_data
+                    └──→ utils.calculate_run_offsets(run, ref_id)
+                        └──→ run.offsets = {48060: 0.023, ...}
+                            └──→ tree.add_run_to_set(run, set_number)
+
+
+PASO 3: MEDIA DE OFFSETS POR SET
+---------------------------------
+tree.sets ──→ para cada CalibrationSet
+          └──→ utils.calculate_calibset_mean_offsets(calib_set)
+              └──→ calib_set.mean_offsets = media de todos los runs
+              └──→ calib_set.offset_errors = desviación estándar
+
+
+PASO 4: CONSTANTES FINALES (MAQUINARIA PESADA)
+-----------------------------------------------
+tree ──→ utils.calculate_tree_calibration_constants(tree, ref_set=57)
+     │
+     ├──→ Para cada sensor:
+     │    ├──→ utils.find_paths_to_absolute_reference(sensor, 57)
+     │    │    └──→ [camino1, camino2, camino3, ...]
+     │    │
+     │    ├──→ Para cada camino:
+     │    │    └──→ utils.calculate_offset_along_path(camino)
+     │    │         └──→ (offset, error)
+     │    │
+     │    └──→ utils.weighted_average_of_paths(offsets, errors)
+     │         └──→ (constante_final, error_final)
+     │
+     └──→ Actualiza sensor.calibration_constant
+
+
+PASO 5: EXPORTAR
+-----------------
+tree ──→ utils.export_calibration_results(tree, "results.csv")
+     └──→ CSV con constantes finales
+
+
+RESPONSABILIDADES:
+==================
+
+┌──────────────────┬─────────────────────────────────────────────┐
+│ COMPONENTE       │ RESPONSABILIDAD                             │
+├──────────────────┼─────────────────────────────────────────────┤
+│ Sensor           │ • Almacenar ID                              │
+│ (DATA CLASS)     │ • Almacenar constante                       │
+│                  │ • [NO] Calcular nada                        │
+├──────────────────┼─────────────────────────────────────────────┤
+│ Run              │ • Almacenar filename                        │
+│ (DATA CLASS)     │ • Almacenar datos de temperatura (crudos)   │
+│                  │ • Almacenar offsets (calculados por utils)  │
+│                  │ • [NO] Entender de sets                     │
+│                  │ • [NO] Calcular offsets (lo hace utils)    │
+├──────────────────┼─────────────────────────────────────────────┤
+│ CalibrationSet   │ • Agrupar 12 sensores                       │
+│ (DATA CLASS)     │ • Agrupar múltiples runs                    │
+│                  │ • Almacenar mean_offsets (media simple)     │
+│                  │ • [NO] Calcular constantes finales          │
+│                  │ • [NO] Referenciar a set absoluto           │
+├──────────────────┼─────────────────────────────────────────────┤
+│ Tree             │ • Crear estructura desde config.yml         │
+│ (ESTRUCTURA)     │ • Derivar relaciones parent-child           │
+│                  │ • Clasificar por rondas                     │
+│                  │ • Imprimir estructura clara                 │
+│                  │ • [NO] Calcular constantes (lo hace utils)  │
+├──────────────────┼─────────────────────────────────────────────┤
+│ utils.py         │ • Cargar datos de archivos                  │
+│ (MAQUINARIA)     │ • Calcular offsets de runs                  │
+│                  │ • Calcular medias por set                   │
+│                  │ • Encontrar caminos en árbol                │
+│                  │ • Calcular constantes finales               │
+│                  │ • Media ponderada de caminos                │
+│                  │ • Exportar resultados                       │
+├──────────────────┼─────────────────────────────────────────────┤
+│ main.py          │ • Orquestar flujo completo                  │
+│ (ORQUESTACIÓN)   │ • Llamar funciones en orden correcto        │
+│                  │ • Coordinar entrada/salida                  │
+│                  │ • Logs y mensajes informativos              │
+└──────────────────┴─────────────────────────────────────────────┘
+
+
+COMPARACIÓN: ANTES vs DESPUÉS
+==============================
+
+┌────────────────────┬─────────────────────┬─────────────────────┐
+│ ASPECTO            │ ANTES               │ DESPUÉS             │
+├────────────────────┼─────────────────────┼─────────────────────┤
+│ Run                │ 243 líneas          │ 20 líneas           │
+│                    │ Entiende de sets    │ Solo datos          │
+│                    │ Calcula offsets     │ No calcula          │
+├────────────────────┼─────────────────────┼─────────────────────┤
+│ Set                │ 327 líneas          │ 30 líneas           │
+│                    │ Lógica compleja     │ Solo datos          │
+│                    │ Múltiples métodos   │ Sin métodos         │
+├────────────────────┼─────────────────────┼─────────────────────┤
+│ Tree               │ 1342 líneas         │ 80 líneas           │
+│                    │ Hace cálculos       │ Solo estructura     │
+│                    │ Lógica mezclada     │ Relaciones claras   │
+├────────────────────┼─────────────────────┼─────────────────────┤
+│ utils.py           │ Funciones básicas   │ 500+ líneas         │
+│                    │ Poco organizado     │ Toda la maquinaria  │
+├────────────────────┼─────────────────────┼─────────────────────┤
+│ main.py            │ No existe           │ Flujo claro         │
+│                    │                     │ Documentado         │
+├────────────────────┼─────────────────────┼─────────────────────┤
+│ TOTAL CLASES       │ ~2000 líneas        │ ~150 líneas         │
+│ TOTAL MAQUINARIA   │ Dispersa            │ 500 líneas utils.py │
+└────────────────────┴─────────────────────┴─────────────────────┘
+
+
+VENTAJAS CLAVE:
+===============
+
+✅ Clases son DATA CLASSES puras (muy cortas)
+✅ Toda la lógica en utils.py (testeable)
+✅ Run NO entiende de sets (feedback del tutor)
+✅ Tree conoce relaciones (feedback del tutor)
+✅ CalibSet NO calcula constantes finales (feedback del tutor)
+✅ main.py orquesta claramente el flujo
+✅ Fácil de explicar al tutor
+✅ Fácil de mantener y extender
+✅ Testeable (funciones puras en utils)
+
+
+EJEMPLO DE USO:
+===============
+
+# main.py
+config = load_config()
+tree = Tree(config)  # Estructura vacía
+
+tree.print_structure()  # ← IMPRIME ÁRBOL CLARO DESDE EL INICIO
+# Output:
+# ============================================================
+# ESTRUCTURA DEL ÁRBOL DE CALIBRACIÓN
+# ============================================================
+# 
+# 📊 RONDA 1: 45 sets
+#   Set  3: 12 sensores | Refs: [48176, 48177] | Raised: [48203, 48479] | Parents: []
+#   Set  4: 12 sensores | Refs: [48176, 48177] | Raised: [48484, 48491] | Parents: []
+#   ...
+# 
+# 📊 RONDA 2: 8 sets
+#   Set 49: 12 sensores | Refs: [48176, 48177] | Raised: [...] | Parents: [3, 4, 5]
+#   ...
+# 
+# 📊 RONDA 3: 7 sets
+#   Set 57: 12 sensores | Refs: [...] | Raised: [] | Parents: [49, 50, 51]
+# ============================================================
+
+# Cargar datos
+for row in logfile:
+    run = Run(row['filename'])
+    run = utils.load_run_data(run)
+    run.offsets = utils.calculate_run_offsets(run, ref_id)
+    tree.add_run_to_set(run, set_number)
+
+# Calcular medias por set
+for calib_set in tree.sets.values():
+    utils.calculate_calibset_mean_offsets(calib_set)
+
+# Calcular constantes finales (MAQUINARIA PESADA)
+utils.calculate_tree_calibration_constants(tree, ref_set=57)
+
+# Exportar
+utils.export_calibration_results(tree, "results.csv")
+"""

@@ -1,0 +1,153 @@
+"""
+DIAGRAMA DE ARQUITECTURA OOP - Sistema de Calibración RTD
+==========================================================
+
+                    ┌─────────────────────────────────────┐
+                    │          TREE                       │
+                    │  (Organizador de toda la estructura)│
+                    ├─────────────────────────────────────┤
+                    │ - config: dict                      │
+                    │ - logfile: DataFrame                │
+                    │ - sets: Dict[int, CalibrationSet]   │
+                    ├─────────────────────────────────────┤
+                    │ + _build_structure()                │
+                    │ + load_runs_for_set()               │
+                    │ + calibrate_set()                   │
+                    │ + calibrate_all()                   │
+                    │ + get_set()                         │
+                    └──────────────┬──────────────────────┘
+                                   │
+                                   │ contiene múltiples
+                                   │
+                ┌──────────────────┴──────────────────┐
+                │                                     │
+                ▼                                     ▼
+    ┌────────────────────────────┐      ┌────────────────────────────┐
+    │   CalibrationSet (Set 3)   │      │   CalibrationSet (Set 4)   │
+    │  12 sensores + 2 refs      │      │  12 sensores + 2 refs      │
+    ├────────────────────────────┤      ├────────────────────────────┤
+    │ - set_number: int          │      │ - set_number: int          │
+    │ - round: int               │      │ - round: int               │
+    │ - parent_set: int          │      │ - parent_set: int          │
+    │ - sensors: List[Sensor]    │      │ - sensors: List[Sensor]    │
+    │ - reference_sensors: [2]   │      │ - reference_sensors: [2]   │
+    │ - runs: List[Run]          │      │ - runs: List[Run]          │
+    │ - calibration_constants{}  │      │ - calibration_constants{}  │
+    ├────────────────────────────┤      ├────────────────────────────┤
+    │ + add_run()                │      │ + add_run()                │
+    │ + calculate_calibration()  │      │ + calculate_calibration()  │
+    │ + get_sensor()             │      │ + get_sensor()             │
+    └─────────┬──────────────────┘      └─────────┬──────────────────┘
+              │                                   │
+              │ contiene                          │ contiene
+              │                                   │
+    ┌─────────┴─────────┐              ┌─────────┴─────────┐
+    │                   │              │                   │
+    ▼                   ▼              ▼                   ▼
+┌─────────┐      ┌─────────┐      ┌─────────┐      ┌─────────┐
+│ Sensor  │      │ Sensor  │      │ Sensor  │      │ Sensor  │
+│ 48060   │      │ 48061   │      │ 48480   │      │ 48481   │
+├─────────┤      ├─────────┤      ├─────────┤      ├─────────┤
+│ id: int │      │ id: int │      │ id: int │      │ id: int │
+│ calib:  │      │ calib:  │      │ calib:  │      │ calib:  │
+│  float  │      │  float  │      │  float  │      │  float  │
+└─────────┘      └─────────┘      └─────────┘      └─────────┘
+    ▲                                   ▲
+    │                                   │
+    │ ... x12 sensores por set          │ ... x12 sensores por set
+    │                                   │
+
+    ┌────────────────────────────────────────────────────────┐
+    │              Runs (Experimentos)                       │
+    ├────────────────────────────────────────────────────────┤
+    │                                                        │
+    │   ┌──────────────┐    ┌──────────────┐               │
+    │   │    Run 1     │    │    Run 2     │               │
+    │   ├──────────────┤    ├──────────────┤               │
+    │   │ filename     │    │ filename     │               │
+    │   │ set_number   │    │ set_number   │               │
+    │   │ sensor_ids[] │    │ sensor_ids[] │               │
+    │   │ reference_id │    │ reference_id │               │
+    │   │ is_valid     │    │ is_valid     │               │
+    │   │ offsets{}    │    │ offsets{}    │               │
+    │   └──────────────┘    └──────────────┘               │
+    │                                                        │
+    │   Cada Run calcula offsets respecto a UNA referencia  │
+    │   Los CalibrationSet usan múltiples Runs para         │
+    │   calcular constantes finales (media ponderada)       │
+    └────────────────────────────────────────────────────────┘
+
+
+FLUJO DE DATOS:
+===============
+
+1. INICIALIZACIÓN (Estructura vacía)
+   config.yml ──→ Tree._build_structure() ──→ Crea CalibrationSet (vacíos)
+                                          └──→ Cada set crea 12 Sensors
+
+2. CARGA DE DATOS
+   archivos .txt ──→ Run.__init__() ──→ Calcula offsets
+                                    └──→ Se añade a CalibrationSet
+
+3. CALIBRACIÓN
+   CalibrationSet.runs[] ──→ calculate_calibration_constants()
+                         └──→ Media ponderada de caminos
+                         └──→ Actualiza Sensor.calibration_constant
+
+4. EXPORT
+   Tree.get_all_sensors() ──→ Lista de todos los sensores con constantes
+                          └──→ DataFrame / CSV / Gráficos
+
+
+RELACIONES:
+===========
+
+Tree  1 ──────── * CalibrationSet
+CalibrationSet  1 ──────── 12 Sensor (sensores a calibrar)
+CalibrationSet  1 ──────── 2 Sensor (referencias)
+CalibrationSet  1 ──────── * Run
+Run  1 ──────── 1 CalibrationSet (por set_number)
+
+
+RESPONSABILIDADES CLARAS:
+==========================
+
+Sensor:
+  - Almacenar ID
+  - Almacenar constante de calibración
+  - [NO] calcular nada
+  - [NO] leer archivos
+  
+Run:
+  - Leer archivo .txt
+  - Calcular offsets respecto a UNA referencia
+  - Saber si es válido (BAD/GOOD)
+  - [NO] calcular constantes finales
+  
+CalibrationSet:
+  - Agrupar 12 sensores
+  - Agrupar múltiples runs
+  - Calcular constantes finales (media ponderada)
+  - Construir caminos entre sensores
+  - [NO] organizar otros sets
+  
+Tree:
+  - Crear estructura desde config.yml
+  - Organizar todos los CalibrationSet
+  - Coordinar calibración
+  - Proveer acceso a cualquier sensor/set
+  - [NO] hacer cálculos de calibración
+
+
+VENTAJAS:
+=========
+
+✓ Cada clase tiene UNA responsabilidad
+✓ Fácil de testear (cada clase por separado)
+✓ Fácil de explicar al tutor
+✓ Estructura vacía primero, datos después
+✓ Flexible (añadir/quitar runs fácilmente)
+✓ Código limpio y mantenible
+✓ No hay código duplicado
+✓ Reutilizable (Sensor se usa en múltiples sets)
+"""
