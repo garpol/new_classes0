@@ -483,7 +483,11 @@ sensors:
       reference: []
       sensors: []
 run_options:
-  max_nan_threshold: 40
+  max_nan_threshold: 40  # Número máximo de NaN permitidos en ventana temporal
+  max_nan_percentage: 0.90  # Porcentaje máximo de NaN (90% = permitir hasta 300 NaN de 333)
+  time_window:
+    start_min: 20  # Inicio de ventana temporal estable (minutos)
+    end_min: 40    # Fin de ventana temporal estable (minutos)
   valid_temp_range:
     min: 60
     max: 350

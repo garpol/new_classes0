@@ -4,58 +4,65 @@ import os
 class Logfile:
     def __init__(self, filepath: str = None, df: pd.DataFrame = None, save_parsed: str = None) -> None:
         """
-        Class to handle reading and normalizing a local CSV logfile.
+        Clase para leer y normalizar un archivo CSV de log local.
 
-        Parameters:
-            filepath (str, optional): Path to the local CSV file. If not provided, `df` must be provided.
-            df (pd.DataFrame, optional): Preloaded DataFrame to use directly.
-            save_parsed (str, optional): If provided, the normalized dataframe will be written to this path as CSV. (save_parsed = 'data/results/parsed_logfile.csv', for example.) 
+        Parámetros:
+            filepath (str, opcional): Ruta al archivo CSV local. Si no se proporciona, se debe dar 'df'.
+            df (pd.DataFrame, opcional): DataFrame ya cargado para usar directamente.
+            save_parsed (str, opcional): Si se proporciona, el DataFrame normalizado se guardará en esta ruta como CSV.
+                                         Ejemplo: save_parsed = 'data/results/parsed_logfile.csv'
         """
         self.filepath = filepath
         self._raw = df
         self.log_file = self.download_logfile()
-        if save_parsed and isinstance(self.log_file, pd.DataFrame): #se comprueba que la instancia sea un DataFrame de pandas antes de guardar el df normalizado en CSV en disco.
+        # Si se especificó ruta para guardar, guardar el DataFrame normalizado
+        if save_parsed and isinstance(self.log_file, pd.DataFrame):
             try:
-                os.makedirs(os.path.dirname(save_parsed), exist_ok=True) # Crear directorio si no existe, si ya existe no hace nada.
-                self.log_file.to_csv(save_parsed, index=False) # Guardar sin índice de pandas en el CSV.
+                # Crear directorio si no existe
+                os.makedirs(os.path.dirname(save_parsed), exist_ok=True)
+                # Guardar CSV sin índice de pandas
+                self.log_file.to_csv(save_parsed, index=False)
                 print(f"Parsed logfile saved to: {save_parsed}")
-            except Exception as e: # Captura cualquier error al guardar el CSV.
+            except Exception as e:
                 print(f"Warning: could not save parsed logfile to {save_parsed}: {e}")
 
     def download_logfile(self):
         """
-        Function to read data from a local CSV file. If a DataFrame is provided, it uses that directly.
+        Lee datos desde un archivo CSV local. Si se proporcionó un DataFrame, lo usa directamente.
 
         Returns:
-            pandas.DataFrame: DataFrame containing the data from the CSV file. 
+            pandas.DataFrame: DataFrame con los datos del archivo CSV.
         """
         try:
-            # If DataFrame supplied, use it
-            if isinstance(self._raw, pd.DataFrame): #si es cierto que se ha proporcionado un DataFrame, se usa directamente.
-                df = self._raw.copy() # Crear una copia para evitar modificar el original.
+            # Si se proporcionó un DataFrame, usarlo directamente
+            if isinstance(self._raw, pd.DataFrame):
+                df = self._raw.copy()  # Crear copia para evitar modificar el original
             else:
-                if not self.filepath or not os.path.exists(self.filepath): #si no se ha proporcionado filepath o no existe el archivo en la ruta dada, se lanza error.
+                # Verificar que exista el archivo
+                if not self.filepath or not os.path.exists(self.filepath):
                     raise FileNotFoundError(f"Logfile not found at '{self.filepath}'")
-                df = pd.read_csv(self.filepath) # Leer el CSV desde la ruta dada.
+                df = pd.read_csv(self.filepath)
 
-            # Normalize column names and common columns:
-            df = df.rename(columns=lambda c: c.strip()) # Eliminar espacios en blanco accidentales en los nombres de las columnas con la función lambda c: c.strip().
-            # Ensure expected columns exist; add placeholders (None) if needed:
+            # Normalizar nombres de columnas eliminando espacios en blanco
+            df = df.rename(columns=lambda c: c.strip())
+            
+            # Asegurar que existan las columnas esperadas, añadir con None si faltan
             expected = ["Filename", "Selection", "CalibSetNumber", "Date", "N_Run"]
             for col in expected:
-                if col not in df.columns: #si alguna de las columnas esperadas no está en el DataFrame, se añade con valores None.
-                    df[col] = None # Añadir columna vacía si no existe.
+                if col not in df.columns:
+                    df[col] = None  # Añadir columna vacía si no existe
 
-            # Coerce CalibSetNumber to numeric when possible
-            # BUT: preserve string values like "FRAME_SET1", "FRAME_SET2", "RESIST_SET", etc.
+            # Convertir CalibSetNumber a numérico cuando sea posible
+            # PERO: preservar valores string como "FRAME_SET1", "RESIST_SET", etc.
             try:
-                if "CalibSetNumber" in df.columns: #solo si la columna CalibSetNumber está en el DataFrame.
-                    has_special_set = df["CalibSetNumber"].astype(str).str.contains('SET', case=False, na=False).any() # Comprobar si hay valores que contienen 'SET' (FRAME_SET, RESIST_SET, etc.).
+                if "CalibSetNumber" in df.columns:
+                    # Comprobar si hay valores especiales que contienen 'SET' (FRAME_SET, RESIST_SET, etc.)
+                    has_special_set = df["CalibSetNumber"].astype(str).str.contains('SET', case=False, na=False).any()
                     
                     if not has_special_set:
-                        # Only convert to numeric if no special SET tags present
+                        # Solo convertir a numérico si no hay etiquetas SET especiales
                         df["CalibSetNumber"] = pd.to_numeric(df["CalibSetNumber"], errors='coerce')
-                    # Otherwise keep original string/object dtype
+                    # Si hay valores especiales, mantener el tipo string/object original
             except Exception:
                 pass
 
@@ -66,29 +73,33 @@ class Logfile:
 
     def select_files(self, **kwargs): 
         """
-        Select files from a log file DataFrame based on given conditions.
+        Selecciona archivos del DataFrame de log basado en condiciones dadas.
 
-        Parameters:
-            kwargs (dict): Dictionary of column-value pairs specifying conditions for selection.
-                Values can be a single value or a list of values, for example:
+        Parámetros:
+            kwargs (dict): Diccionario de pares columna-valor especificando condiciones de selección.
+                Los valores pueden ser un valor único o una lista de valores, por ejemplo:
                     select_files(Selection='CALIBRATION', CalibSetNumber=[1, 2, 3])
+        
         Returns:
-            pandas.DataFrame: DataFrame containing selected rows based on the conditions. 
+            pandas.DataFrame: DataFrame con las filas seleccionadas según las condiciones.
         """
         try:
-            selection = self.log_file.copy()  # Create a copy of the original DataFrame to avoid direct modification
+            selection = self.log_file.copy()  # Crear copia para evitar modificar el original
 
-            for column, value in kwargs.items(): # Iterar sobre cada condición proporcionada en kwargs
-                if column not in selection.columns: #si la columna dada en kwargs no está en el DataFrame, se lanza error.
+            # Iterar sobre cada condición proporcionada
+            for column, value in kwargs.items():
+                # Verificar que la columna exista
+                if column not in selection.columns:
                     raise ValueError(f"Column '{column}' does not exist in the DataFrame.")
 
-                if isinstance(value, list): #si el valor de value dado en kwargs es una lista, 
-                    selection = selection.loc[selection[column].isin(value)] # Filtrar filas donde el valor de la columna está en la lista.
+                # Si el valor es una lista, usar .isin()
+                if isinstance(value, list):
+                    selection = selection.loc[selection[column].isin(value)]
+                # Si es un valor único, filtrar por igualdad exacta
                 else:
-                    selection = selection.loc[selection[column] == value] # Si el valor no es una lista, filtrar filas donde el valor de la columna coincide exactamente.
+                    selection = selection.loc[selection[column] == value]
 
             return selection
 
         except Exception as e:
-            # In case of error, raise a detailed exception
             raise RuntimeError(f"An error occurred while selecting files: {e}")

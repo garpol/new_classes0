@@ -31,24 +31,19 @@ import argparse
 from pathlib import Path
 import time
 
-# Añadir src al path
+# Añadir src al path una sola vez
 src_path = Path(__file__).parent / 'src'
-sys.path.insert(0, str(src_path))
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
 
-# Añadir utils al path para evitar conflicto con utils.py
-utils_path = src_path / 'utils'
-sys.path.insert(0, str(utils_path))
+# Imports de las clases principales
+from logfile import Logfile
 
-from calibset import CalibSet  # type: ignore
-from logfile import Logfile  # type: ignore
-from config import load_config  # type: ignore
-from tree_utils import create_tree_from_calibsets  # type: ignore
-from calibration_utils import calibrate_tree, export_calibration_details  # type: ignore
-
-# Import utils functions
-sys.path.remove(str(utils_path))  # Remover para importar utils.py
-from utils import create_calibration_set  # type: ignore
-sys.path.insert(0, str(utils_path))  # Volver a añadir
+# Imports de utils - todos en un solo lugar
+from utils.config import load_config
+from utils.tree_utils import create_tree_from_calibsets
+from utils.calibration_utils import calibrate_tree, export_calibration_details
+from utils.set_utils import create_calibration_set
 
 
 def main():
@@ -140,13 +135,13 @@ def main():
     
     for i, set_id in enumerate(all_set_ids, 1):
         try:
-            # Usar create_calibration_set de utils
-            calibset = create_calibration_set(
+            # Usar create_calibration_set de utils - devuelve tupla (calibset, mean_offsets, std_offsets)
+            calibset, mean_offsets, std_offsets = create_calibration_set(
                 set_number=set_id,
                 logfile=logfile,
                 config=config
             )
-            calibsets[set_id] = calibset
+            calibsets[set_id] = calibset  # Solo guardamos el CalibSet
             
             # Log cada 10 sets
             if i % 10 == 0:

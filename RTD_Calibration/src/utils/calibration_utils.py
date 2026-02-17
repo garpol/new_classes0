@@ -7,7 +7,7 @@ Funciones principales:
 - calibrate_tree(): Función principal que calcula constantes finales
 """
 
-from typing import Dict, List, Tuple, Optional
+from typing import List, Tuple, Optional
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -19,88 +19,69 @@ if str(parent_dir) not in sys.path:
 
 from tree_entry import TreeEntry
 from tree import Tree
-from math_utils import propagate_error
+from utils.math_utils import propagate_error
 
 
 def find_all_paths_to_reference(
-    sensor_id: int,
+    sensor: 'Sensor',
     start_entry: TreeEntry,
     tree: Tree
-) -> List[Tuple[float, float, List[Tuple[TreeEntry, int]]]]:
+) -> List[Tuple[float, float, List[Tuple[TreeEntry, 'Sensor']]]]:
     """
-    Encuentra TODOS los caminos posibles desde un sensor en R1 hasta la referencia en R3.
-    
-    Cada camino usa diferentes combinaciones de raised para subir por las rondas.
+    Encuentra TODOS los caminos desde un sensor hasta la referencia.
     
     Args:
-        sensor_id: ID del sensor origen (en R1)
-        start_entry: TreeEntry donde está el sensor (típicamente R1)
-        tree: Tree completo con estructura y offsets
+        sensor: Objeto Sensor de origen (típicamente en R1)
+        start_entry: TreeEntry donde está el sensor
+        tree: Tree completo
     
     Returns:
         Lista de tuplas (offset_total, error_total, path_details)
-        donde path_details = [(entry, raised_used), ...]
-        
-    Examples:
-        >>> # Sensor 48060 del Set 3 (R1)
-        >>> entry_3 = tree.get_entry(3.0)
-        >>> paths = find_all_paths_to_reference(48060, entry_3, tree)
-        >>> print(f"Encontrados {len(paths)} caminos")
-        >>> for offset, error, path in paths:
-        ...     print(f"  Camino: offset={offset:.4f} ± {error:.4f}")
-    
-    Notes:
-        - Si hay 2 raised en R1 y 2 raised en R2, habrá 4 caminos posibles
-        - Cada camino es independiente y puede tener diferente offset/error
-        - La media ponderada se hace DESPUÉS con weighted_average_paths()
     """
     paths = []
     root = tree.get_root()
     
     if root is None:
-        print("⚠️  Error: Tree no tiene root establecido")
         return paths
     
-    # Si el sensor está descartado, no calcular
-    if start_entry.is_sensor_discarded(sensor_id):
+    # Si está descartado, no calcular
+    if start_entry.is_sensor_discarded(sensor):
         return paths
     
-    # Obtener raised disponibles para este sensor (modificado 19/01/26 y comentado)
-
-    available_raised = start_entry.get_raised_for_sensor(sensor_id)
-    # Si el sensor es raised, añadirlo como camino consigo mismo
-    #if sensor_id in start_entry.raised_sensors and sensor_id not in available_raised:
-    #    available_raised.append(sensor_id)
-
+    # Obtener raised disponibles para este sensor
+    available_raised = start_entry.get_raised_for_sensor(sensor)
+    
     if not available_raised:
-        print(f"⚠️  Sensor {sensor_id} en Set {start_entry.set_number} no tiene raised disponibles")
         return paths
     
     # Para cada raised en R1, buscar caminos hacia R3
     for raised_r1 in available_raised:
-        # Paso 1: Offset sensor → raised_r1 (dentro del mismo set)
-        offset_step1 = start_entry.get_offset_to_raised(sensor_id, raised_r1)
+        # Paso 1: Calcular offset del sensor hasta el raised de R1
+        # Esto nos da cuánto difiere el sensor respecto al raised
+        offset_step1 = start_entry.get_offset_to_raised(sensor, raised_r1)
         
         if offset_step1 is None:
             continue
         
         offset_1, error_1 = offset_step1
         
-        # Paso 2: Encontrar en qué entry de R2 aparece raised_r1
+        # Paso 2: Buscar en qué entry de R2 (Ronda 2) aparece el raised_r1
+        # El raised de R1 debe estar también en algún set de R2 para poder subir
         r2_entries = tree.get_entries_by_round(2)
         
         for entry_r2 in r2_entries:
-            if raised_r1 not in entry_r2.sensors:
-                continue  # Este entry R2 no tiene el raised_r1
+            # Verificar si este entry de R2 contiene el raised_r1
+            if raised_r1 not in entry_r2.calibset.sensors:
+                continue
             
-            # Paso 3: Desde raised_r1, subir a un raised de R2
+            # Paso 3: Desde raised_r1 (ahora en R2), subir a un raised de R2
             available_raised_r2 = entry_r2.get_raised_for_sensor(raised_r1)
             
             if not available_raised_r2:
                 continue
             
             for raised_r2 in available_raised_r2:
-                # Offset raised_r1 → raised_r2 (dentro de entry_r2)
+                # Calcular offset de raised_r1 hasta raised_r2 (segundo salto)
                 offset_step2 = entry_r2.get_offset_to_raised(raised_r1, raised_r2)
                 
                 if offset_step2 is None:
@@ -108,43 +89,40 @@ def find_all_paths_to_reference(
                 
                 offset_2, error_2 = offset_step2
                 
-                # Paso 4: Subir de raised_r2 a la referencia en R3
-                # Buscar en qué entry de R3 aparece raised_r2
+                # Paso 4: Desde raised_r2, subir hasta la referencia absoluta en R3
+                # R3 es la ronda final que contiene la referencia absoluta del experimento
                 r3_entries = tree.get_entries_by_round(3)
                 
                 for entry_r3 in r3_entries:
-                    if raised_r2 not in entry_r3.sensors:
+                    if raised_r2 not in entry_r3.calibset.sensors:
                         continue
                     
-                    # Obtener sensor de referencia en R3
-                    # La referencia es reference_id del calibset de R3
-                    reference_id = entry_r3.calibset.reference_id
+                    # Obtener referencia del R3 (primer sensor de reference_sensors)
+                    reference_id = entry_r3.calibset.reference_sensors[0].id if entry_r3.calibset.reference_sensors else None
                     
-                    # Offset raised_r2 → reference (dentro de entry_r3)
-                    # Usamos el calibset.mean_offsets directamente
-                    if raised_r2 == reference_id:
+                    # Offset raised_r2 → reference
+                    if raised_r2.id == reference_id:
                         offset_3 = 0.0
                         error_3 = 0.0
-                    elif raised_r2 in entry_r3.calibset.mean_offsets:
-                        # Offset de raised_r2 respecto a reference
-                        # mean_offsets[raised_r2] = T(raised_r2) - T(reference)
-                        # Esto ya es el offset que necesitamos en la cadena
-                        offset_3 = entry_r3.calibset.mean_offsets[raised_r2]
-                        error_3 = entry_r3.calibset.std_offsets.get(raised_r2, 0.0)
+                    elif raised_r2.id in entry_r3.calibset.mean_offsets:
+                        offset_3 = entry_r3.calibset.mean_offsets[raised_r2.id]
+                        error_3 = entry_r3.calibset.std_offsets.get(raised_r2.id, 0.0)
                     else:
                         continue
                     
-                    # Encadenar offsets: sensor → raised_r1 → raised_r2 → reference
+                    # Encadenar los tres offsets para obtener el offset total
+                    # offset_total = (sensor → raised_r1) + (raised_r1 → raised_r2) + (raised_r2 → referencia)
                     total_offset = offset_1 + offset_2 + offset_3
                     total_error = propagate_error(error_1, error_2, error_3)
                     
-                    # Guardar camino con detalles
+                    # Guardar información del camino completo
                     path_details = [
                         (start_entry, raised_r1),
                         (entry_r2, raised_r2),
                         (entry_r3, reference_id)
                     ]
                     
+                    # Añadir este camino a la lista de caminos válidos
                     paths.append((total_offset, total_error, path_details))
     
     return paths
@@ -175,22 +153,25 @@ def weighted_average_paths(
     if not paths:
         return None, None
     
+    # Si solo hay un camino, devolver su offset y error directamente
     if len(paths) == 1:
         return paths[0][0], paths[0][1]
     
-    # Extraer offsets y errores
+    # Extraer los offsets y errores de todos los caminos
     offsets = np.array([p[0] for p in paths])
     errors = np.array([p[1] for p in paths])
     
-    # Calcular pesos (w = 1/σ²)
-    # Evitar división por cero
+    # Calcular pesos para la media ponderada: peso = 1/error²
+    # Los caminos con menor error tienen más peso (son más confiables)
+    # Evitar división por cero usando un valor muy pequeño
     errors_safe = np.where(errors == 0, 1e-10, errors)
     weights = 1.0 / (errors_safe ** 2)
     
-    # Media ponderada
+    # Calcular la media ponderada: suma(peso * offset) / suma(pesos)
     weighted_mean = np.sum(weights * offsets) / np.sum(weights)
     
-    # Error propagado
+    # Calcular el error propagado: 1 / raíz(suma de pesos)
+    # Esto da un error menor cuando hay más caminos (más información)
     propagated_error = 1.0 / np.sqrt(np.sum(weights))
     
     return weighted_mean, propagated_error
@@ -229,12 +210,12 @@ def calibrate_tree(
     
     root = tree.get_root()
     if root is None:
-        print("⚠️  Error: Tree no tiene root establecido")
+        print("[WARNING] Error: Tree no tiene root establecido")
         return pd.DataFrame()
     
     # Obtener sensor de referencia
     if reference_sensor_id is None:
-        reference_sensor_id = root.calibset.reference_id
+        reference_sensor_id = root.calibset.reference_sensors[0].id if root.calibset.reference_sensors else None
     
     print(f"\nCalculando constantes de calibración:")
     print(f"  Referencia absoluta: Sensor {reference_sensor_id} (Set {root.set_number})")
@@ -250,15 +231,15 @@ def calibrate_tree(
     for entry in sorted(r1_entries, key=lambda e: e.set_number):
         print(f"\n  Set {entry.set_number}:")
         
-        for sensor_id in entry.sensors:
+        for sensor in entry.calibset.sensors:
             total_sensors += 1
             
             # Verificar si está descartado
-            if entry.is_sensor_discarded(sensor_id):
+            if entry.is_sensor_discarded(sensor):
                 results.append({
-                    'Sensor': sensor_id,
+                    'Sensor': sensor.id,
                     'Set': entry.set_number,
-                    'Round': entry.round,
+                    'Round': tree.get_round(entry),
                     'Constante_Calibracion_K': np.nan,
                     'Error_K': np.nan,
                     'N_Paths': 0,
@@ -266,14 +247,14 @@ def calibrate_tree(
                 })
                 continue
             
-            # Encontrar todos los caminos
-            paths = find_all_paths_to_reference(sensor_id, entry, tree)
+            # Encontrar caminos desde sensor hasta referencia
+            paths = find_all_paths_to_reference(sensor, entry, tree)
             
             if not paths:
                 results.append({
-                    'Sensor': sensor_id,
+                    'Sensor': sensor.id,
                     'Set': entry.set_number,
-                    'Round': entry.round,
+                    'Round': tree.get_round(entry),
                     'Constante_Calibracion_K': np.nan,
                     'Error_K': np.nan,
                     'N_Paths': 0,
@@ -287,25 +268,25 @@ def calibrate_tree(
             if offset is not None:
                 calculated_sensors += 1
                 results.append({
-                    'Sensor': sensor_id,
+                    'Sensor': sensor.id,
                     'Set': entry.set_number,
-                    'Round': entry.round,
+                    'Round': tree.get_round(entry),
                     'Constante_Calibracion_K': offset,
                     'Error_K': error,
                     'N_Paths': len(paths),
                     'Status': 'Calculado'
                 })
                 
-                if sensor_id in entry.raised_sensors:
-                    print(f"    Sensor {sensor_id} (RAISED): {offset:.4f} ± {error:.4f} K ({len(paths)} caminos)")
+                if sensor in entry.raised_sensors:
+                    print(f"    Sensor {sensor.id} (RAISED): {offset:.4f} ± {error:.4f} K ({len(paths)} caminos)")
                 elif len(paths) > 2:
-                    print(f"    Sensor {sensor_id}: {offset:.4f} ± {error:.4f} K ({len(paths)} caminos)")
+                    print(f"    Sensor {sensor.id}: {offset:.4f} ± {error:.4f} K ({len(paths)} caminos)")
     
     # Agregar referencia absoluta
     results.append({
         'Sensor': reference_sensor_id,
         'Set': root.set_number,
-        'Round': root.round,
+        'Round': tree.get_round(root),  # Calcular dinámicamente (debería ser 3)
         'Constante_Calibracion_K': 0.0,
         'Error_K': 0.0,
         'N_Paths': 0,
@@ -318,7 +299,7 @@ def calibrate_tree(
     
     # Resumen
     print("\n" + "=" * 70)
-    print(f"✓ Calibración completada:")
+    print(f"[OK] Calibración completada:")
     print(f"  Total sensores: {total_sensors}")
     print(f"  Calculados: {calculated_sensors}")
     print(f"  Descartados: {len(df[df['Status'] == 'Descartado'])}")
@@ -335,7 +316,7 @@ def calibrate_tree(
     # Exportar CSV
     if output_csv:
         df.to_csv(output_csv, index=False)
-        print(f"\n✓ CSV exportado: {output_csv}")
+        print(f"\n[OK] CSV exportado: {output_csv}")
     
     return df
 
@@ -367,11 +348,11 @@ def export_calibration_details(
     
     root = tree.get_root()
     if root is None:
-        print("⚠️  Error: Tree no tiene root establecido")
+        print("[WARNING] Error: Tree no tiene root establecido")
         return pd.DataFrame()
     
     if reference_sensor_id is None:
-        reference_sensor_id = root.calibset.reference_id
+        reference_sensor_id = root.calibset.reference_sensors[0].id if root.calibset.reference_sensors else None
     
     print(f"\nExportando detalles de calibración...")
     print(f"  Referencia: Sensor {reference_sensor_id}")
@@ -380,13 +361,13 @@ def export_calibration_details(
     r1_entries = tree.get_entries_by_round(1)
     
     for entry in sorted(r1_entries, key=lambda e: e.set_number):
-        for sensor_id in entry.sensors:
+        for sensor in entry.calibset.sensors:
             # Skip descartados
-            if entry.is_sensor_discarded(sensor_id):
+            if entry.is_sensor_discarded(sensor):
                 continue
             
             # Buscar todos los caminos
-            paths = find_all_paths_to_reference(sensor_id, entry, tree)
+            paths = find_all_paths_to_reference(sensor, entry, tree)
             
             if not paths:
                 continue
@@ -399,41 +380,41 @@ def export_calibration_details(
                 entry_r3, reference = path_details[2]
                 
                 # Paso 1: sensor → raised_r1
-                offset_1, error_1 = entry_r1.get_offset_to_raised(sensor_id, raised_r1)
+                offset_1, error_1 = entry_r1.get_offset_to_raised(sensor, raised_r1)
                 
                 # Paso 2: raised_r1 → raised_r2
                 offset_2, error_2 = entry_r2.get_offset_to_raised(raised_r1, raised_r2)
                 
                 # Paso 3: raised_r2 → reference
-                if raised_r2 == reference:
+                if raised_r2.id == reference:
                     offset_3 = 0.0
                     error_3 = 0.0
                 else:
-                    offset_3 = entry_r3.calibset.mean_offsets.get(raised_r2, 0.0)
-                    error_3 = entry_r3.calibset.std_offsets.get(raised_r2, 0.0)
+                    offset_3 = entry_r3.calibset.mean_offsets.get(raised_r2.id, 0.0)
+                    error_3 = entry_r3.calibset.std_offsets.get(raised_r2.id, 0.0)
                 
                 results.append({
-                    'Sensor': sensor_id,
+                    'Sensor': sensor.id,
                     'Set': entry.set_number,
-                    'Round': entry.round,
+                    'Round': tree.get_round(entry),  # Calcular dinámicamente
                     'Path_Number': path_idx,
                     
                     # Paso 1: sensor → raised_r1 en R1
-                    'Paso1_From': sensor_id,
-                    'Paso1_To': raised_r1,
+                    'Paso1_From': sensor.id,
+                    'Paso1_To': raised_r1.id,
                     'Paso1_Set': entry_r1.set_number,
                     'Paso1_Offset_K': offset_1,
                     'Paso1_Error_K': error_1,
                     
                     # Paso 2: raised_r1 → raised_r2 en R2
-                    'Paso2_From': raised_r1,
-                    'Paso2_To': raised_r2,
+                    'Paso2_From': raised_r1.id,
+                    'Paso2_To': raised_r2.id,
                     'Paso2_Set': entry_r2.set_number,
                     'Paso2_Offset_K': offset_2,
                     'Paso2_Error_K': error_2,
                     
                     # Paso 3: raised_r2 → reference en R3
-                    'Paso3_From': raised_r2,
+                    'Paso3_From': raised_r2.id,
                     'Paso3_To': reference,
                     'Paso3_Set': entry_r3.set_number,
                     'Paso3_Offset_K': offset_3,
@@ -448,20 +429,13 @@ def export_calibration_details(
             if len(paths) > 0:
                 final_offset, final_error = weighted_average_paths(paths)
                 
-                # Calcular pesos para mostrar
-                offsets = np.array([p[0] for p in paths])
-                errors = np.array([p[1] for p in paths])
-                errors_safe = np.where(errors == 0, 1e-10, errors)
-                weights = 1.0 / (errors_safe ** 2)
-                weights_norm = weights / weights.sum()
-                
                 results.append({
-                    'Sensor': sensor_id,
+                    'Sensor': sensor.id,
                     'Set': entry.set_number,
-                    'Round': entry.round,
+                    'Round': tree.get_round(entry),  # Calcular dinámicamente
                     'Path_Number': 0,  # 0 indica media ponderada
                     
-                    'Paso1_From': sensor_id,
+                    'Paso1_From': sensor.id,
                     'Paso1_To': 'PROMEDIO',
                     'Paso1_Set': entry.set_number,
                     'Paso1_Offset_K': np.nan,
@@ -489,7 +463,7 @@ def export_calibration_details(
     
     # Exportar
     df.to_csv(output_csv, index=False)
-    print(f"✓ Detalles exportados: {output_csv}")
+    print(f"[OK] Detalles exportados: {output_csv}")
     print(f"  Total filas: {len(df)}")
     print(f"  Sensores únicos: {df['Sensor'].nunique()}")
     
