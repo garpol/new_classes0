@@ -1,3 +1,8 @@
+# =============================================================================
+# NOTA: El análisis detallado de sensores, inventario y opciones de trees
+#       se ha movido a: RTD_Calibration/TREE_GIGANTE_DESIGN.md
+# =============================================================================
+
 paths:
   data_dir: RTD_Calibration/data/temperature_files
   logfile: RTD_Calibration/data/LogFile.csv
