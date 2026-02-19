@@ -10,10 +10,12 @@
 ### Sensores por Calibrar (en laboratorio)
 - **PT-111** (cajón lab): 4 unidades (en el presupuesto de compra se indican 20), estos van en las INLETS.
 - **PT-103** (cajón lab): 56 unidades (en el presupuesto se indican 65 comprados pero 4 ya los usé para completar el último set de ronda 1).
-- **Total por calibrar**: 60 sensores = 56 + 4 comprados 
+- **Sensores a localizar/comprar**: 8 unidades adicionales necesarios
+- **Total por calibrar**: 68 sensores = 60 en lab + 8 a buscar/comprar 
 
 ### Total Potencial
-- **514 + 60 = 574 sensores** se necesitan 450 + 66 + 66 sensores (ver PRR)
+- **514 + 68 = 582 sensores** → EXACTO para los 3 detectores (450 + 66 + 66)
+- **Condición**: Localizar o comprar los 8 sensores faltantes
 
 ---
 
@@ -33,16 +35,20 @@
 
 ### DÉFICIT: 8 SENSORES
 - Necesitamos: 582 sensores (450 + 66 + 66)
-- Tenemos: 574 sensores (514 calibrados + 60 por calibrar)
+- Tenemos calibrados: 514 sensores
+- Tenemos en lab: 60 sensores (4 PT-111 + 56 PT-103)
+- Disponible: 514 + 60 = 574 sensores
 - **FALTAN: 8 sensores**
 
 **Acciones necesarias:**
 1. Buscar sensores perdidos del inventario:
-   - Frame Set 13 (no localizado)
+   - Frame Set 13 (no localizado) - podría tener hasta 12 sensores
    - 16 PT-111 faltantes del presupuesto
-   - 5 PT-103 faltantes del presupuesto
+   - 5 PT-103 faltantes del presupuesto  
    - 26 sensores descartados (verificar si están físicamente y pueden recuperarse)
-2. Si no se localizan, comprar 8 sensores adicionales y calibrarlos
+2. Si se localizan 8+ sensores: calibrar para completar 68 total
+3. Si no se localizan: comprar 8 sensores adicionales y calibrarlos
+4. Total a calibrar: 68 sensores (60 del lab + 8 localizados/comprados)
 
 ---
 
@@ -87,55 +93,20 @@
 
 ### OPCIÓN B: 3 TREES SEPARADOS POR DETECTOR
 
-#### Ventajas
-1. **Separación clara**: Cada detector tiene su propio tree independiente
-2. **Archivos manejables**: ~450, ~66, ~66 entradas por tree
-3. **Sin contaminación cruzada**: Problemas en un tree no afectan otros
-4. **Especialización**: Cada tree puede tener configuración específica
-5. **Distribución física**: Corresponde con la realidad de los detectores
-6. **IMPORTANTE: Aprovecha calibraciones existentes**: Los 514 sensores YA están calibrados
+**NO VIABLE** debido a la jerarquía encadenada existente.
 
-#### Desventajas
-1. **Gestión múltiple**: 3 archivos separados
-2. **Reorganización inicial**: Decidir qué sensores van a cada detector
-3. **Menos flexibilidad**: Reasignar sensores entre detectores requiere más trabajo
+#### Por qué no funciona:
+1. **Sensores raised están en múltiples rondas**: Un sensor de Ronda 1 que es raised aparece también en Ronda 2
+2. **Dependencias jerárquicas**: Ronda 2 depende de Ronda 1, Ronda 3 de Ronda 2, etc.
+3. **Duplicación masiva**: Separar requeriría duplicar sensores que están en múltiples niveles
+4. **Pérdida de trazabilidad**: La cadena de calibración se rompería
 
-#### Estructura propuesta
+#### Si se quisiera implementar:
+- Requeriría reestructuración completa del config.yml
+- Recalibración o reinterpretación de todas las rondas jerárquicas  
+- Pérdida de la metodología de calibración jerárquica ya establecida
 
-**Tree 1 - APAs (450 sensores)**
-- Tomar los 450 mejores sensores de los 514 calibrados
-- Criterios de selección:
-  - Error de calibración más bajo
-  - Mayor estabilidad
-  - Mejor caracterización (más runs)
-  - Sensores de sets tempranos (más confiables)
-
-**Tree 2 - Detector HD (66 sensores)**
-- De los 64 sensores sobrantes calibrados: ~32 sensores
-- De los 60 nuevos PT-111/PT-103 calibrados: ~30 sensores
-- De sensores localizados o comprados: ~4 sensores
-- Total: 66 sensores
-
-**Tree 3 - Detector VD (66 sensores)**
-- De los 64 sensores sobrantes calibrados: ~32 sensores
-- De los 60 nuevos PT-111/PT-103 calibrados: ~30 sensores
-- De sensores localizados o comprados: ~4 sensores
-- Total: 66 sensores
-
-#### Implementación con calibraciones existentes
-
-**VENTAJA CLAVE**: Ya tienes 514 sensores calibrados con todos sus sets y runs
-- No necesitas recalibrar nada
-- Solo necesitas ORGANIZAR los sensores en 3 trees
-- Los 60 nuevos se calibrarán después y se añadirán a Trees 2 y 3
-
-**Proceso:**
-1. Clasificar los 514 sensores calibrados según calidad
-2. Asignar top 450 → Tree APAs
-3. Asignar 64 restantes → Trees HD y VD (32 cada uno provisonalmente)
-4. Buscar los 8 sensores faltantes en el laboratorio o comprarlos
-5. Calibrar los 60 nuevos sensores (PT-111 y PT-103) + 8 localizados/comprados
-6. Completar Trees HD y VD hasta 66 cada uno con los nuevos calibrados
+**Conclusión: Descartada por inviable técnicamente.**
 
 ---
 
@@ -143,32 +114,63 @@
 
 | Aspecto | Tree Gigante | 3 Trees Separados |
 |---------|--------------|-------------------|
-| **Complejidad inicial** | Baja | Media (clasificación) |
-| **Aprovecha calibraciones existentes** | ✓ Sí | ✓ Sí |
-| **Flexibilidad futura** | Alta | Media |
-| **Claridad organizativa** | Media | Alta |
-| **Riesgo de errores** | Medio | Bajo |
-| **Trabajo adicional** | Mínimo | Mínimo |
-| **Correspondencia física** | No directa | Directa |
-| **Escalabilidad** | Alta | Media |
+| **Complejidad inicial** | Baja | **IMPOSIBLE** |
+| **Aprovecha calibraciones existentes** | ✓ Sí | ✗ Rompe jerarquía |
+| **Mantiene jerarquía encadenada** | ✓ Sí | ✗ No |
+| **Flexibilidad futura** | Alta | N/A |
+| **Claridad organizativa** | Media (filtrar por campo) | No viable |
+| **Riesgo de errores** | Bajo | Alto (duplicación) |
+| **Trabajo adicional** | Mínimo | Reestructuración masiva |
+| **Trazabilidad completa** | ✓ Sí | ✗ Fragmentada |
+
+**CONCLUSIÓN**: Dado que la calibración está jerárquicamente encadenada (Ronda 1→2→3→4), separar en 3 trees requeriría:
+- Duplicar sensores raised que están en múltiples rondas
+- Romper las dependencias de calibración
+- Recalibrar o reestructurar completamente
+
+**Por tanto, Tree Gigante es la única opción viable.**
 
 ---
 
-### RECOMENDACIÓN
+### ANÁLISIS DE LA JERARQUÍA ACTUAL
 
-**Opción B (3 Trees Separados)** es más adecuada porque:
+**Estructura del tree existente:**
+```
+Ronda 1: Sets 3-48, 59-61 (540 sensores únicos, 514 válidos)
+    ↓ (sensores raised como referencias)
+Ronda 2: Sets 49-56 (84 sensores = sensores raised de Ronda 1)
+    ↓ (sensores raised como referencias)
+Ronda 3: Sets 57, 62 (12 sensores = sensores raised de Ronda 2)
+    ↓ (sensores raised como referencias)
+Ronda 4: Set 63 (vacío - preparado para siguiente nivel)
+```
 
-1. **Ya tienes todas las calibraciones hechas** → No hay trabajo extra innecesario
-2. **Separación natural**: Corresponde con los 3 detectores físicos
-3. **Menor riesgo**: Problemas aislados por detector
-4. **Facilita entrega**: Cada detector recibe su tree específico
-5. **Trazabilidad**: Más fácil rastrear qué sensores van a qué detector
+**Encadenamiento jerárquico:**
+- Cada set de Ronda 1 tiene `parent_set` apuntando a un set de Ronda 2
+- Los sensores `raised` de cada set son los que se usan en el parent_set
+- La calibración está **encadenada jerárquicamente** - no son independientes
+- Los sensores de rondas superiores dependen de los de rondas inferiores
+
+**IMPLICACIÓN CRÍTICA**: No se pueden separar los trees sin romper las dependencias jerárquicas.
+
+---
+
+### RECOMENDACIÓN ACTUALIZADA
+
+**Opción A (Tree Gigante Unificado)** es la única viable porque:
+
+1. **Mantiene la jerarquía intacta**: Los encadenamientos Ronda 1→2→3→4 se preservan
+2. **Evita duplicación**: Los sensores raised están en múltiples rondas - separarlos requeriría duplicarlos
+3. **Ya tienes todas las calibraciones**: 514 sensores calibrados en su estructura jerárquica
+4. **Trazabilidad completa**: Se mantiene toda la cadena de calibración de cada sensor
+5. **Flexibilidad**: Añadir campo `detector_assignment` permite filtrar por detector sin romper jerarquía
 
 **Trabajo necesario**:
-- Desarrollar criterio de selección para los 450 mejores → Tree APAs
-- Distribuir los 64 restantes entre Trees 2 y 3
-- NO requiere recalibración
-- Solo organización de datos existentes
+- Extender TreeEntry con campo `detector_assignment: str` ("APAs", "HD", "VD", "Unassigned")
+- Algoritmo para asignar los 450 mejores → APAs
+- Distribuir 64 restantes entre HD y VD
+- Añadir los 60 nuevos sensores cuando se calibren
+- **NO requiere recalibración ni reestructuración**
 
 ---
 
@@ -187,9 +189,46 @@
 - **Ronda 2, 3, 4**: Refinamiento jerárquico
 
 ### Nivel 4 (FUTURO): Nuevos Sensores del Lab
-- **Set 64+**: Calibración de los 60 sensores PT-111 y PT-103
-- Seguir metodología establecida
-- Asignar a Detector 2 y Detector 3
+
+**Sensores a calibrar cuando se localicen/compren:**
+- **PT-111** (cajón lab): 4 unidades
+- **PT-103** (cajón lab): 56 unidades  
+- **Sensores a localizar o comprar**: 8 unidades (para completar los 582 necesarios)
+- **Total a calibrar**: 68 sensores
+
+**Organización en sets (RAMA PARALELA):**
+
+```
+RONDA 1: 6 sets nuevos (Sets 64-69)
+  - Set 64: 12 sensores → 2 raised
+  - Set 65: 12 sensores → 2 raised
+  - Set 66: 12 sensores → 2 raised
+  - Set 67: 12 sensores → 2 raised
+  - Set 68: 12 sensores → 2 raised
+  - Set 69: 8 sensores  → 2 raised
+  Total: 68 sensores → 12 raised
+      ↓
+RONDA 2: 1 set nuevo (Set 70)
+  - 12 sensores (raised de Sets 64-69 Ronda 1)
+  - 2 raised
+      ↓
+RONDA 3: 1 set parcial nuevo (Set 71)
+  - 2 sensores (raised del Set 70 Ronda 2)
+  - Converge con Sets 57, 62 existentes
+      ↓
+RONDA 4: Set 63 (ya existe)
+  - CONVERGENCIA de toda la jerarquía
+```
+
+**Total sets nuevos:** 8 (Sets 64-71: 6 en R1 + 1 en R2 + 1 en R3)
+
+**Ventajas:**
+- Rama paralela limpia, no interfiere con calibraciones existentes
+- Converge naturalmente en Ronda 4 (Set 63)
+- Fácil rastrear: Sets 64+ son los nuevos
+- Patrón consistente: 2 raised por set
+
+**Paso previo:** Localizar los 8 sensores faltantes o comprarlos antes de calibrar
 
 ---
 
@@ -270,6 +309,10 @@ Detector VD:    66 sensores
 -----------
 TOTAL:         582 sensores
 
-Disponibles:   574 sensores (514 calibrados + 60 por calibrar)
-FALTAN:          8 sensores (buscar en lab o comprar)
+Calibrados:    514 sensores
+En laboratorio: 60 sensores (4 PT-111 + 56 PT-103)
+A buscar/comprar: 8 sensores
+-----------
+POR CALIBRAR:   68 sensores (cuando se completen)
+TOTAL FINAL:   582 sensores ✓
 ```
